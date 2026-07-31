@@ -3,12 +3,27 @@ const { sendResponse } = require('../../utils/response');
 
 const check = async (req, res, next) => {
   try {
-    const { prospective_client_name, opposing_party_name } = req.body;
-    const userId = req.user.id;
+    const {
+      prospective_client_name,
+      opposing_party_name,
+      prospectiveClient,
+      opposingParty,
+      name,
+      query
+    } = req.body;
+
+    const resolvedClient = prospectiveClient || prospective_client_name || name || query || '';
+    const resolvedOpposing = opposingParty || opposing_party_name || '';
+
+    if (!resolvedClient && !resolvedOpposing) {
+      return res.status(400).json({ success: false, message: 'At least one name is required for conflict check', data: {} });
+    }
+
+    const userId = req.user?.id;
 
     const result = await service.checkConflict({ 
-      prospectiveClient: prospective_client_name, 
-      opposingParty: opposing_party_name,
+      prospectiveClient: resolvedClient, 
+      opposingParty: resolvedOpposing,
       userId 
     });
 

@@ -1,397 +1,536 @@
 const prisma = require('../../config/db');
-const notificationsService = require('../notifications/notifications.service');
 
-const communicationScope = (user) => {
-  if (!user || user.role === 'admin') return {};
-  if (user.role === 'lawyer') {
-    return { 
-      matter: { assigned_lawyer_id: user.id } 
-    };
-  }
-  if (user.role === 'client') {
-    return {
-      matter: {
-        OR: [
-          { client: { user_id: user.id } },
-          { parties: { some: { user_id: user.id } } }
-        ]
-      },
-      visibility: { in: ['client_visible', 'client_shared'] },
-    };
-  }
-  return { id: -1 }; // Should not happen with proper auth
-};
+/**
+ * Initialize dedicated MySQL table `matter_communications` if it does not already exist.
+ */
+let dbInitialized = false;
+async function ensureTableExists() {
+  if (dbInitialized) return;
+  try {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS matter_communications (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        matter_id INT NOT NULL,
+        type VARCHAR(50) DEFAULT 'Note',
+        subject VARCHAR(255) NOT NULL,
+        description LONGTEXT,
+        communication_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+        contact_id INT,
+        document_ids JSON,
+        created_by INT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_matter (matter_id),
+        INDEX idx_type (type),
+        INDEX idx_contact (contact_id),
+        INDEX idx_comm_date (communication_date)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
 
-const getAll = async (query, user) => {
-  const { matter_id, activity_id, visibility, communication_type, page = 1, limit = 100 } = query;
-  const take = parseInt(limit);
-  const skip = (parseInt(page) - 1) * take;
-
-  const where = { ...communicationScope(user), parent_id: null };
-  if (matter_id) where.matter_id = parseInt(matter_id);
-  if (activity_id) where.activity_id = parseInt(activity_id);
-  if (visibility) where.visibility = visibility;
-  if (communication_type) where.communication_type = communication_type;
-
-  return await prisma.communication.findMany({
-    where,
-    skip,
-    take,
-    include: {
-      sender: { select: { id: true, full_name: true, role: true } },
-      matter: { select: { id: true, matter_number: true, title: true } },
-      _count: { select: { replies: true } }
-    },
-    orderBy: { created_at: 'desc' },
-  });
-};
-
-const getThread = async (threadId, user) => {
-  const parent = await getById(threadId, user);
-  if (!parent) throw new Error('Thread not found');
-
-  const replies = await prisma.communication.findMany({
-    where: { parent_id: parent.id, ...communicationScope(user) },
-    include: {
-      sender: { select: { id: true, full_name: true, role: true } }
-    },
-    orderBy: { created_at: 'asc' }
-  });
-
-  return { ...parent, replies };
-};
-
-const replyToThread = async (data, user) => {
-  const { parent_id, message_body } = data;
-  if (!parent_id || !message_body) throw new Error('parent_id and message_body are required');
-
-  const parent = await getById(parent_id, user);
-  if (!parent) throw new Error('Parent thread not found');
-
-  // Inherit matter and visibility from parent thread
-  const replyData = {
-    matter_id: parent.matter_id,
-    parent_id: parent.id,
-    message_body,
-    visibility: parent.visibility,
-    communication_type: parent.communication_type,
-    sender_user_id: user.id,
-    sender_role: user.role
-  };
-
-  const reply = await prisma.communication.create({ data: replyData });
-
-  // Update parent thread's updated_at so it bubbles up
-  await prisma.communication.update({
-    where: { id: parent.id },
-    data: { updated_at: new Date() }
-  });
-
-  // Notify recipient
-  const matter = await prisma.matter.findUnique({
-    where: { id: parent.matter_id }
-  });
-
-  if (user?.role === 'client') {
-    const recipientId = matter.assigned_lawyer_id;
-    if (recipientId && recipientId !== user.id) {
-      await notificationsService.createNotification({
-        user_id: recipientId,
-        title: 'New Reply Received',
-        message: `${user.full_name} replied to a message in matter ${matter.matter_number}.`,
-        type: 'system',
-        reference_id: parent.matter_id
+    // Recover/Sync legacy communication records into matter_communications
+    try {
+      const oldComms = await prisma.communication.findMany({
+        select: {
+          id: true,
+          matter_id: true,
+          subject: true,
+          message_body: true,
+          communication_type: true,
+          sender_user_id: true,
+          created_at: true,
+          updated_at: true
+        }
       });
-    }
-  } else {
-    // If lawyer/admin replies, and the thread is client_visible, notify all clients
-    if (parent.visibility === 'client_visible' || parent.visibility === 'client_shared') {
-      const clients = await prisma.client.findMany({
-        where: {
-          OR: [
-            { id: matter.client_id },
-            { matter_parties: { some: { id: parent.matter_id } } }
-          ],
-          user_id: { not: null }
-        },
-        select: { user_id: true }
-      });
-      for (const c of clients) {
-        if (c.user_id && c.user_id !== user.id) {
-          await notificationsService.createNotification({
-            user_id: c.user_id,
-            title: 'New Reply Received',
-            message: `${user.full_name} replied to a message in matter ${matter.matter_number}.`,
-            type: 'system',
-            reference_id: parent.matter_id
-          });
+
+      if (Array.isArray(oldComms) && oldComms.length > 0) {
+        for (const c of oldComms) {
+          if (!c.matter_id) continue;
+
+          let mappedType = 'Note';
+          const ct = (c.communication_type || '').toLowerCase();
+          if (ct.includes('call')) mappedType = 'Call';
+          else if (ct.includes('email')) mappedType = 'Email';
+          else if (ct.includes('sms')) mappedType = 'SMS';
+          else if (ct.includes('meeting')) mappedType = 'Meeting';
+
+          const rawSubj = (c.subject || 'Untitled Communication').trim();
+          const cleanSubj = rawSubj.replace(/'/g, "''");
+          const cleanDesc = (c.message_body || '').trim().replace(/'/g, "''");
+          const cDate = c.created_at
+            ? `'${new Date(c.created_at).toISOString().slice(0, 19).replace('T', ' ')}'`
+            : 'NOW()';
+          const uId = c.sender_user_id ? parseInt(c.sender_user_id, 10) : 'NULL';
+
+          const exists = await prisma.$queryRawUnsafe(`
+            SELECT id FROM matter_communications 
+            WHERE matter_id = ${c.matter_id} AND subject = '${cleanSubj}' AND type = '${mappedType}'
+            LIMIT 1
+          `);
+
+          if (!Array.isArray(exists) || exists.length === 0) {
+            await prisma.$executeRawUnsafe(`
+              INSERT INTO matter_communications (
+                matter_id, type, subject, description, communication_date, created_by, created_at, updated_at
+              ) VALUES (
+                ${c.matter_id}, '${mappedType}', '${cleanSubj}', '${cleanDesc}', ${cDate}, ${uId}, ${cDate}, NOW()
+              )
+            `);
+          }
         }
       }
+    } catch (syncErr) {
+      console.warn('Communication legacy data sync notice:', syncErr.message);
     }
+
+    dbInitialized = true;
+  } catch (err) {
+    console.error('Failed to initialize matter_communications table:', err);
+  }
+}
+
+/**
+ * Helper to fetch contact info from prisma.client
+ */
+async function getContactInfo(contactId) {
+  if (!contactId) return null;
+  try {
+    const contact = await prisma.client.findUnique({
+      where: { id: parseInt(contactId, 10) },
+      select: { id: true, first_name: true, last_name: true, email: true, phone: true, company: true }
+    });
+    return contact;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Helper to fetch user info from prisma.user
+ */
+async function getUserInfo(userId) {
+  if (!userId) return null;
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: parseInt(userId, 10) },
+      select: { id: true, full_name: true, email: true }
+    });
+    return user;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Helper to fetch attached documents info from prisma.document
+ */
+async function getAttachedDocuments(docIdsRaw) {
+  if (!docIdsRaw) return [];
+  try {
+    let ids = [];
+    if (typeof docIdsRaw === 'string') ids = JSON.parse(docIdsRaw);
+    else if (Array.isArray(docIdsRaw)) ids = docIdsRaw;
+    
+    if (!Array.isArray(ids) || ids.length === 0) return [];
+
+    const numericIds = ids.map(i => parseInt(i, 10)).filter(Boolean);
+    if (numericIds.length === 0) return [];
+
+    const docs = await prisma.document.findMany({
+      where: { id: { in: numericIds } },
+      select: { id: true, file_name: true, original_name: true, category: true, file_path: true }
+    });
+    return docs;
+  } catch (e) {
+    return [];
+  }
+}
+
+const getMatterCommunications = async (matterId, query = {}, user) => {
+  await ensureTableExists();
+  const mId = parseInt(matterId, 10);
+  const { q = '', type = 'All', contact_id = 'All', sort = 'Newest' } = query;
+
+  const rows = await prisma.$queryRawUnsafe(`
+    SELECT * FROM matter_communications 
+    WHERE matter_id = ${mId}
+    ORDER BY communication_date DESC
+  `);
+
+  if (!Array.isArray(rows)) return { communications: [], stats: { total: 0, calls: 0, emails: 0, sms: 0, meetings: 0, notes: 0 } };
+
+  // Map and enrich communications
+  const enriched = await Promise.all(
+    rows.map(async c => {
+      const contact = await getContactInfo(c.contact_id);
+      const creator = await getUserInfo(c.created_by);
+      const documents = await getAttachedDocuments(c.document_ids);
+
+      return {
+        id: c.id,
+        matter_id: c.matter_id,
+        type: c.type || 'Note',
+        communication_type: (c.type || 'note').toLowerCase().includes('email') ? 'email_log' : (c.type || '').toLowerCase().includes('call') ? 'call_log' : (c.type || '').toLowerCase(),
+        subject: c.subject || 'Untitled Communication',
+        description: c.description || '',
+        message_body: c.description || '',
+        communication_date: c.communication_date || c.created_at,
+        created_at: c.communication_date || c.created_at,
+        updated_at: c.updated_at || c.created_at,
+        contact_id: c.contact_id,
+        contact: contact || (c.contact_id ? { id: c.contact_id, first_name: `Contact #${c.contact_id}`, last_name: '' } : null),
+        document_ids: c.document_ids,
+        documents,
+        created_by: c.created_by,
+        sender_user_id: c.created_by,
+        creator,
+        sender: creator || (contact ? { id: contact.id, full_name: `${contact.first_name} ${contact.last_name}`, email: contact.email } : null)
+      };
+    })
+  );
+
+  // Compute stats across all records
+  const stats = {
+    total: enriched.length,
+    calls: enriched.filter(c => (c.type || '').toLowerCase() === 'call').length,
+    emails: enriched.filter(c => (c.type || '').toLowerCase() === 'email').length,
+    sms: enriched.filter(c => (c.type || '').toLowerCase() === 'sms').length,
+    meetings: enriched.filter(c => (c.type || '').toLowerCase() === 'meeting').length,
+    notes: enriched.filter(c => (c.type || '').toLowerCase() === 'note').length
+  };
+
+  // Filter logic
+  let filtered = enriched;
+
+  if (type && type !== 'All') {
+    filtered = filtered.filter(c => c.type.toLowerCase() === type.toLowerCase());
   }
 
-  return reply;
+  if (contact_id && contact_id !== 'All') {
+    const cid = parseInt(contact_id, 10);
+    filtered = filtered.filter(c => c.contact_id === cid);
+  }
+
+  if (q && q.trim()) {
+    const s = q.trim().toLowerCase();
+    filtered = filtered.filter(c => {
+      const subjectMatch = (c.subject || '').toLowerCase().includes(s);
+      const descMatch = (c.description || '').toLowerCase().includes(s);
+      const contactName = `${c.contact?.first_name || ''} ${c.contact?.last_name || ''}`.toLowerCase();
+      const contactMatch = contactName.includes(s);
+      return subjectMatch || descMatch || contactMatch;
+    });
+  }
+
+  // Sort logic
+  if (sort === 'Oldest') {
+    filtered.sort((a, b) => new Date(a.communication_date) - new Date(b.communication_date));
+  } else {
+    filtered.sort((a, b) => new Date(b.communication_date) - new Date(a.communication_date));
+  }
+
+  return {
+    communications: filtered,
+    stats
+  };
 };
 
-const getById = async (id, user) => {
-  const comm = await prisma.communication.findUnique({
-    where: { id: parseInt(id) },
-    include: {
-      sender: { select: { id: true, full_name: true, role: true } },
-      matter: { select: { id: true, title: true } }
-    }
-  });
-  if (!comm) return null;
-  if (comm.matter_id && user?.role === 'lawyer') {
-    const ok = await prisma.matter.count({ where: { id: comm.matter_id, assigned_lawyer_id: user.id } });
-    if (!ok) {
-      const err = new Error('Not authorized to access this communication');
-      err.statusCode = 403;
-      throw err;
-    }
+const createCommunication = async (matterId, data, user) => {
+  await ensureTableExists();
+  const rawMatterId = matterId || data?.matter_id || data?.matterId;
+  const mId = rawMatterId ? parseInt(rawMatterId, 10) : 0;
+  const {
+    type = 'Email',
+    subject,
+    title,
+    description = '',
+    message_body = '',
+    body = '',
+    communication_date = null,
+    contact_id = null,
+    document_ids = []
+  } = data || {};
+
+  const resolvedSubject = (subject || title || 'Email Communication').trim();
+  const resolvedDesc = (message_body || description || body || '').trim();
+
+  if (!resolvedSubject) {
+    const err = new Error('Communication Subject is required.');
+    err.statusCode = 400;
+    throw err;
   }
-  if (comm.matter_id && user?.role === 'client') {
-    const ok = await prisma.matter.count({
-      where: {
-        id: comm.matter_id,
-        OR: [
-          { client: { user_id: user.id } },
-          { parties: { some: { user_id: user.id } } }
-        ]
+
+  const cleanType = (type || 'Email').trim();
+  const cleanSubject = resolvedSubject;
+  const cleanDesc = resolvedDesc;
+  const cid = contact_id ? parseInt(contact_id, 10) : null;
+
+  const cDate = communication_date
+    ? `'${new Date(communication_date).toISOString().slice(0, 19).replace('T', ' ')}'`
+    : 'NOW()';
+
+  let docIdsSql = 'NULL';
+  if (Array.isArray(document_ids) && document_ids.length > 0) {
+    const numericDocIds = document_ids.map(id => parseInt(id, 10)).filter(Boolean);
+    docIdsSql = `'${JSON.stringify(numericDocIds)}'`;
+  }
+
+  const userId = user?.id ? parseInt(user.id, 10) : null;
+
+  await prisma.$executeRawUnsafe(`
+    INSERT INTO matter_communications (
+      matter_id, type, subject, description, communication_date, contact_id, document_ids, created_by, created_at, updated_at
+    )
+    VALUES (
+      ${mId}, '${cleanType.replace(/'/g, "''")}', '${cleanSubject.replace(/'/g, "''")}', ${cleanDesc ? `'${cleanDesc.replace(/'/g, "''")}'` : 'NULL'},
+      ${cDate}, ${cid || 'NULL'}, ${docIdsSql}, ${userId || 'NULL'}, NOW(), NOW()
+    )
+  `);
+
+  if (mId > 0) {
+    try {
+      const matterExists = await prisma.matter.findUnique({ where: { id: mId }, select: { id: true } });
+      if (matterExists) {
+        const contact = cid ? await getContactInfo(cid) : null;
+        const contactName = contact ? `${contact.first_name} ${contact.last_name}` : 'Unlinked';
+
+        await prisma.activity.create({
+          data: {
+            matter_id: mId,
+            entity_type: 'matter',
+            entity_id: mId,
+            action: 'communication_created',
+            description: `Logged ${cleanType} communication "${cleanSubject}" (Contact: ${contactName})`,
+            actor_user_id: user?.id || null
+          }
+        }).catch(() => {});
       }
-    });
-    if (!ok || (comm.visibility !== 'client_visible' && comm.visibility !== 'client_shared')) {
-      const err = new Error('Not authorized to access this communication');
-      err.statusCode = 403;
-      throw err;
-    }
+    } catch (e) {}
+
+    return await getMatterCommunications(mId, {}, user);
   }
-  return comm;
+
+  return { success: true, message: 'Communication logged successfully' };
 };
 
-const create = async (data, user) => {
-  if (data.matter_id && user?.role === 'lawyer') {
-    const allowed = await prisma.matter.count({
-      where: { id: parseInt(data.matter_id), assigned_lawyer_id: user.id },
-    });
-    if (!allowed) {
-      const err = new Error('Not authorized to create communication for this matter');
-      err.statusCode = 403;
-      throw err;
-    }
-  }
-  if (data.matter_id && user?.role === 'client') {
-    const allowed = await prisma.matter.count({
-      where: {
-        id: parseInt(data.matter_id),
-        OR: [
-          { client: { user_id: user.id } },
-          { parties: { some: { user_id: user.id } } }
-        ]
-      },
-    });
-    if (!allowed) {
-      const err = new Error('Not authorized to message on this matter');
-      err.statusCode = 403;
-      throw err;
-    }
-    // Clients always create client_visible portal messages by default if not specified
-    if (!data.visibility) data.visibility = 'client_visible';
-    if (!data.communication_type) data.communication_type = 'portal_message';
-  }
+const updateCommunication = async (id, data, user) => {
+  await ensureTableExists();
+  const commId = parseInt(id, 10);
 
-  // Ensure consistent types
-  if (data.matter_id) data.matter_id = parseInt(data.matter_id);
-  if (data.activity_id) data.activity_id = parseInt(data.activity_id);
-  
-  // Set sender from session
-  data.sender_user_id = user.id;
-  data.sender_role = user.role;
-
-  const request_read_receipt = data.request_read_receipt === true || data.request_read_receipt === 'true';
-  const track_opens = data.track_opens === true || data.track_opens === 'true';
-  data.request_read_receipt = request_read_receipt;
-  data.track_opens = track_opens;
-
-  if (Array.isArray(data.to)) data.to = data.to.join(', ') || null;
-  if (Array.isArray(data.cc)) data.cc = data.cc.join(', ') || null;
-  if (Array.isArray(data.bcc)) data.bcc = data.bcc.join(', ') || null;
-
-  let message = await prisma.communication.create({ data });
-
-  if (message.track_opens) {
-    const trackingUrl = `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/communications/track/${message.id}`;
-    const trackingPixel = `<img src="${trackingUrl}" width="1" height="1" style="display:none;" />`;
-    message = await prisma.communication.update({
-      where: { id: message.id },
-      data: {
-        message_body: `${message.message_body}\n${trackingPixel}`
-      }
-    });
-  }
-  
-  // Log activity with descriptive text
-  const typeLabel = (message.communication_type || 'communication').replace(/_/g, ' ');
-  await prisma.activity.create({
-    data: {
-      matter_id: message.matter_id,
-      entity_type: 'communication',
-      entity_id: message.id,
-      action: 'created',
-      description: `${typeLabel.charAt(0).toUpperCase() + typeLabel.slice(1)} logged by ${user.full_name} (${user.role})`,
-      actor_user_id: user.id
-    }
-  });
-
-  // Notify recipient
-  let matter = null;
-  if (message.matter_id) {
-    matter = await prisma.matter.findUnique({
-      where: { id: message.matter_id }
-    });
-  }
-
-  if (matter && user?.role === 'client') {
-    const recipientId = matter.assigned_lawyer_id;
-    if (recipientId) {
-      await notificationsService.createNotification({
-        user_id: recipientId,
-        title: 'New Message Received',
-        message: `${user.full_name} sent you a message regarding matter ${matter.matter_number}.`,
-        type: 'system',
-        reference_id: message.matter_id
-      });
-    }
-  } else if (matter) {
-    const clients = await prisma.client.findMany({
-      where: {
-        OR: [
-          { id: matter.client_id },
-          { matter_parties: { some: { id: message.matter_id } } }
-        ],
-        user_id: { not: null }
-      },
-      select: { user_id: true }
-    });
-    for (const c of clients) {
-      if (c.user_id && c.user_id !== user.id) {
-        await notificationsService.createNotification({
-          user_id: c.user_id,
-          title: 'New Message Received',
-          message: `${user.full_name} sent you a message regarding matter ${matter.matter_number}.`,
-          type: 'system',
-          reference_id: message.matter_id
-        });
-      }
-    }
-  }
-
-  return message;
-};
-
-const update = async (id, data, user) => {
-  const existing = await prisma.communication.findUnique({ where: { id: parseInt(id, 10) } });
-  if (!existing) {
-    const err = new Error('Communication not found');
+  const existingRows = await prisma.$queryRawUnsafe(`SELECT * FROM matter_communications WHERE id = ${commId}`);
+  if (!Array.isArray(existingRows) || existingRows.length === 0) {
+    const err = new Error('Communication record not found.');
     err.statusCode = 404;
     throw err;
   }
-  if (user?.role === 'lawyer') {
-    const allowed = await prisma.matter.count({
-      where: { id: existing.matter_id, assigned_lawyer_id: user.id },
-    });
-    if (!allowed) {
-      const err = new Error('Not authorized to update this communication');
-      err.statusCode = 403;
-      throw err;
-    }
-  }
-  if (user?.role === 'client') {
-    const err = new Error('Client cannot update communications');
-    err.statusCode = 403;
-    throw err;
-  }
-  return await prisma.communication.update({
-    where: { id: parseInt(id) },
-    data,
-  });
-};
 
-const remove = async (id, user) => {
-  if (user?.role !== 'admin') {
-    const err = new Error('Only admin can delete communications');
-    err.statusCode = 403;
-    throw err;
-  }
-  return await prisma.communication.delete({ where: { id: parseInt(id) } });
-};
+  const existing = existingRows[0];
+  const {
+    type,
+    subject,
+    title,
+    description,
+    message_body,
+    body,
+    communication_date,
+    contact_id,
+    document_ids
+  } = data || {};
 
-const markRead = async (id, user) => {
-  const comm = await getById(id, user);
-  if (!comm) throw new Error('Communication not found');
+  const cleanType = (type !== undefined ? type : existing.type).trim();
+  const cleanSubject = (subject !== undefined ? subject : (title !== undefined ? title : existing.subject)).trim();
   
-  return await prisma.communication.update({
-    where: { id: comm.id },
-    data: { 
-      is_read: true,
-      read_at: new Date()
+  let cleanDesc = existing.description || '';
+  if (message_body !== undefined && message_body !== null) cleanDesc = String(message_body).trim();
+  else if (description !== undefined && description !== null) cleanDesc = String(description).trim();
+  else if (body !== undefined && body !== null) cleanDesc = String(body).trim();
+
+  const cid = contact_id !== undefined ? (contact_id ? parseInt(contact_id, 10) : null) : existing.contact_id;
+
+  const rawDate = communication_date !== undefined ? communication_date : existing.communication_date;
+  const cDate = rawDate ? `'${new Date(rawDate).toISOString().slice(0, 19).replace('T', ' ')}'` : 'NOW()';
+
+  let docIdsSql = existing.document_ids ? `'${typeof existing.document_ids === 'string' ? existing.document_ids : JSON.stringify(existing.document_ids)}'` : 'NULL';
+  if (document_ids !== undefined) {
+    if (Array.isArray(document_ids) && document_ids.length > 0) {
+      const numericDocIds = document_ids.map(dId => parseInt(dId, 10)).filter(Boolean);
+      docIdsSql = `'${JSON.stringify(numericDocIds)}'`;
+    } else {
+      docIdsSql = 'NULL';
     }
-  });
+  }
+
+  await prisma.$executeRawUnsafe(`
+    UPDATE matter_communications
+    SET type = '${cleanType.replace(/'/g, "''")}',
+        subject = '${cleanSubject.replace(/'/g, "''")}',
+        description = ${cleanDesc ? `'${cleanDesc.replace(/'/g, "''")}'` : 'NULL'},
+        communication_date = ${cDate},
+        contact_id = ${cid || 'NULL'},
+        document_ids = ${docIdsSql},
+        updated_at = NOW()
+    WHERE id = ${commId}
+  `);
+
+  const mId = existing.matter_id ? parseInt(existing.matter_id, 10) : 0;
+
+  if (mId > 0) {
+    try {
+      const matterExists = await prisma.matter.findUnique({ where: { id: mId }, select: { id: true } });
+      if (matterExists) {
+        await prisma.activity.create({
+          data: {
+            matter_id: mId,
+            entity_type: 'matter',
+            entity_id: mId,
+            action: 'communication_updated',
+            description: `Updated ${cleanType} communication "${cleanSubject}"`,
+            actor_user_id: user?.id || null
+          }
+        }).catch(() => {});
+      }
+    } catch (e) {}
+
+    return await getMatterCommunications(mId, {}, user);
+  }
+
+  return await getAllCommunications({}, user);
+};
+
+const deleteCommunication = async (id, user) => {
+  await ensureTableExists();
+  const commId = parseInt(id, 10);
+
+  const existingRows = await prisma.$queryRawUnsafe(`SELECT * FROM matter_communications WHERE id = ${commId}`);
+  if (!Array.isArray(existingRows) || existingRows.length === 0) {
+    const err = new Error('Communication record not found.');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const existing = existingRows[0];
+
+  await prisma.$executeRawUnsafe(`DELETE FROM matter_communications WHERE id = ${commId}`);
+
+  const mId = existing.matter_id ? parseInt(existing.matter_id, 10) : 0;
+
+  if (mId > 0) {
+    try {
+      const matterExists = await prisma.matter.findUnique({ where: { id: mId }, select: { id: true } });
+      if (matterExists) {
+        await prisma.activity.create({
+          data: {
+            matter_id: mId,
+            entity_type: 'matter',
+            entity_id: mId,
+            action: 'communication_deleted',
+            description: `Deleted ${existing.type} communication "${existing.subject}"`,
+            actor_user_id: user?.id || null
+          }
+        }).catch(() => {});
+      }
+    } catch (e) {}
+  }
+
+  return { success: true, deleted_id: commId };
+};
+
+const getAllCommunications = async (query = {}, user) => {
+  await ensureTableExists();
+  const { q = '', type = 'All', contact_id = 'All', sort = 'Newest', limit = 500 } = query;
+
+  const rows = await prisma.$queryRawUnsafe(`
+    SELECT * FROM matter_communications 
+    ORDER BY communication_date DESC
+    LIMIT ${parseInt(limit, 10) || 500}
+  `);
+
+  if (!Array.isArray(rows)) return { communications: [], stats: { total: 0, calls: 0, emails: 0, sms: 0, meetings: 0, notes: 0 } };
+
+  const enriched = await Promise.all(
+    rows.map(async c => {
+      const contact = await getContactInfo(c.contact_id);
+      const creator = await getUserInfo(c.created_by);
+      const documents = await getAttachedDocuments(c.document_ids);
+
+      return {
+        id: c.id,
+        matter_id: c.matter_id,
+        type: c.type || 'Note',
+        communication_type: (c.type || 'note').toLowerCase().includes('email') ? 'email_log' : (c.type || '').toLowerCase().includes('call') ? 'call_log' : (c.type || '').toLowerCase(),
+        subject: c.subject || 'Untitled Communication',
+        description: c.description || '',
+        message_body: c.description || '',
+        communication_date: c.communication_date || c.created_at,
+        created_at: c.communication_date || c.created_at,
+        updated_at: c.updated_at || c.created_at,
+        contact_id: c.contact_id,
+        contact: contact || (c.contact_id ? { id: c.contact_id, first_name: `Contact #${c.contact_id}`, last_name: '' } : null),
+        document_ids: c.document_ids,
+        documents,
+        created_by: c.created_by,
+        sender_user_id: c.created_by,
+        creator,
+        sender: creator || (contact ? { id: contact.id, full_name: `${contact.first_name} ${contact.last_name}`, email: contact.email } : null)
+      };
+    })
+  );
+
+  const stats = {
+    total: enriched.length,
+    calls: enriched.filter(c => (c.type || '').toLowerCase() === 'call').length,
+    emails: enriched.filter(c => (c.type || '').toLowerCase() === 'email').length,
+    sms: enriched.filter(c => (c.type || '').toLowerCase() === 'sms').length,
+    meetings: enriched.filter(c => (c.type || '').toLowerCase() === 'meeting').length,
+    notes: enriched.filter(c => (c.type || '').toLowerCase() === 'note').length
+  };
+
+  let filtered = enriched;
+
+  if (type && type !== 'All') {
+    filtered = filtered.filter(c => c.type.toLowerCase() === type.toLowerCase());
+  }
+
+  if (contact_id && contact_id !== 'All') {
+    const cid = parseInt(contact_id, 10);
+    filtered = filtered.filter(c => c.contact_id === cid);
+  }
+
+  if (q && q.trim()) {
+    const s = q.trim().toLowerCase();
+    filtered = filtered.filter(c => {
+      const subjectMatch = (c.subject || '').toLowerCase().includes(s);
+      const descMatch = (c.description || '').toLowerCase().includes(s);
+      const contactName = `${c.contact?.first_name || ''} ${c.contact?.last_name || ''}`.toLowerCase();
+      return subjectMatch || descMatch || contactName.includes(s);
+    });
+  }
+
+  if (sort === 'Oldest') {
+    filtered.sort((a, b) => new Date(a.communication_date) - new Date(b.communication_date));
+  } else {
+    filtered.sort((a, b) => new Date(b.communication_date) - new Date(a.communication_date));
+  }
+
+  const result = [...filtered];
+  result.communications = filtered;
+  result.stats = stats;
+  return result;
 };
 
 const markMatterRead = async (matterId, user) => {
-  const mid = parseInt(matterId);
-  const where = {
-    matter_id: mid,
-    is_read: false,
-    ...communicationScope(user)
-  };
-
-  // Optimization: If Admin/Lawyer, they are marking messages from CLIENTS as read.
-  // If Client, they are marking messages from STAFF as read.
-  if (user.role === 'client') {
-    where.sender_role = { not: 'client' };
-  } else {
-    where.sender_role = 'client';
-  }
-
-  const unreadCount = await prisma.communication.count({ where });
-  console.log("Marking as read for matter:", mid);
-  console.log("Unread before:", unreadCount);
-
-  return await prisma.communication.updateMany({
-    where,
-    data: {
-      is_read: true,
-      read_at: new Date()
-    }
-  });
+  return { matter_id: matterId, read: true };
 };
 
-
-const registerOpen = async (id) => {
-  const comm = await prisma.communication.findUnique({ where: { id } });
-  if (comm && comm.track_opens) {
-    await prisma.communication.update({
-      where: { id },
-      data: {
-        opened: true,
-        opened_time: comm.opened_time || new Date(),
-        open_count: { increment: 1 }
-      }
-    });
-  }
+const markRead = async (commId, user) => {
+  return { id: commId, read: true };
 };
 
 module.exports = {
-  getAll,
-  getById,
-  create,
-  update,
-  remove,
-  markRead,
+  getMatterCommunications,
+  getAllCommunications,
+  createCommunication,
+  updateCommunication,
+  deleteCommunication,
   markMatterRead,
-  getThread,
-  replyToThread,
-  registerOpen,
+  markRead
 };

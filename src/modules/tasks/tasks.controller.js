@@ -1,75 +1,58 @@
 const service = require('./tasks.service');
-const { sendResponse } = require('../../utils/response');
 
-const getAll = async (req, res, next) => {
+const sendResponse = (success, message, data = null) => ({
+  success,
+  message,
+  data
+});
+
+const getMatterTasks = async (req, res, next) => {
   try {
-    const data = await service.getAll(req.query, req.user);
-    res.status(200).json(sendResponse(true, 'Tasks fetched successfully', data));
-  } catch (err) {
-    next(err);
-  }
+    const data = await service.getMatterTasks(req.params.matterId, req.query, req.user);
+    res.status(200).json(sendResponse(true, 'Matter tasks fetched successfully', data));
+  } catch (err) { next(err); }
 };
 
-const getById = async (req, res, next) => {
+const createTask = async (req, res, next) => {
   try {
-    const data = await service.getById(req.params.id, req.user);
-    res.status(200).json(sendResponse(true, 'Task fetched successfully', data));
-  } catch (err) {
-    next(err);
-  }
-};
-
-const create = async (req, res, next) => {
-  try {
-    const data = await service.create(req.body, req.user);
+    const data = await service.createTask(req.params.matterId, req.body, req.user);
     res.status(201).json(sendResponse(true, 'Task created successfully', data));
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
-const update = async (req, res, next) => {
+const updateTask = async (req, res, next) => {
   try {
-    const data = await service.update(req.params.id, req.body, req.user);
+    const data = await service.updateTask(req.params.id, req.body, req.user);
     res.status(200).json(sendResponse(true, 'Task updated successfully', data));
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
+};
+
+const deleteTask = async (req, res, next) => {
+  try {
+    const data = await service.deleteTask(req.params.id, req.user);
+    res.status(200).json(sendResponse(true, 'Task deleted successfully', data));
+  } catch (err) { next(err); }
+};
+
+const getAllTasks = async (req, res, next) => {
+  try {
+    const data = await service.getAllTasks(req.query, req.user);
+    res.status(200).json(sendResponse(true, 'All tasks fetched successfully', data));
+  } catch (err) { next(err); }
 };
 
 const completeTask = async (req, res, next) => {
   try {
     const data = await service.completeTask(req.params.id, req.user);
-    res.status(200).json(sendResponse(true, 'Task completed successfully', data));
-  } catch (err) {
-    next(err);
-  }
-};
-
-const reopenTask = async (req, res, next) => {
-  try {
-    const data = await service.reopenTask(req.params.id, req.user);
-    res.status(200).json(sendResponse(true, 'Task reopened successfully', data));
-  } catch (err) {
-    next(err);
-  }
-};
-
-const remove = async (req, res, next) => {
-  try {
-    await service.remove(req.params.id, req.user);
-    res.status(200).json(sendResponse(true, 'Task deleted successfully'));
-  } catch (err) {
-    next(err);
-  }
+    res.status(200).json(sendResponse(true, 'Task marked as completed', data));
+  } catch (err) { next(err); }
 };
 
 module.exports = {
-  getAll,
-  getById,
-  create,
-  update,
-  completeTask,
-  reopenTask,
-  remove
+  getMatterTasks,
+  getAllTasks,
+  createTask,
+  updateTask,
+  deleteTask,
+  completeTask
 };

@@ -227,6 +227,9 @@ model Matter {
   created_at           DateTime     @default(now())
   updated_at           DateTime     @updatedAt
   next_hearing         DateTime?
+  parties_data         Json?
+  vehicles_data        Json?
+  intake_answers       Json?
 
   client               Client       @relation(fields: [client_id], references: [id])
   assigned_lawyer      User?        @relation("AssignedLawyer", fields: [assigned_lawyer_id], references: [id])
@@ -906,5 +909,48 @@ model Expense {
   @@index([matter_id])
   @@index([created_at])
   @@map("expenses")
+}
+
+model IntakeModuleDefinition {
+  id             Int                          @id @default(autoincrement())
+  key            String                       @unique
+  title          String
+  description    String?                      @db.Text
+  icon           String                       @default("📋")
+  category       String                       @default("General")
+  is_core        Boolean                      @default(false)
+  is_enabled     Boolean                      @default(true)
+  display_order  Int                          @default(0)
+  practice_area  String                       @default("All")
+  created_at     DateTime                     @default(now())
+  updated_at     DateTime                     @updatedAt
+
+  fields         IntakeModuleFieldDefinition[]
+
+  @@map("intake_module_definitions")
+}
+
+model IntakeModuleFieldDefinition {
+  id             Int                    @id @default(autoincrement())
+  module_id      Int
+  field_key      String
+  field_label    String
+  field_type     String                 // text, textarea, number, date, checkbox, radio, select, multiselect, file
+  placeholder    String?
+  default_value  String?                @db.Text
+  help_text      String?
+  options        Json?                  // array of option strings
+  is_required    Boolean                @default(false)
+  min_length     Int?
+  max_length     Int?
+  min_value      Float?
+  max_value      Float?
+  display_order  Int                    @default(0)
+  created_at     DateTime               @default(now())
+  updated_at     DateTime               @updatedAt
+
+  module         IntakeModuleDefinition @relation(fields: [module_id], references: [id], onDelete: Cascade)
+
+  @@map("intake_module_field_definitions")
 }
 

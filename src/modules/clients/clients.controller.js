@@ -22,6 +22,14 @@ const getById = async (req, res, next) => {
 const create = async (req, res, next) => {
   try {
     const data = await service.create(req.body, req.user);
+    if (data && data.duplicate) {
+      return res.status(409).json({
+        duplicate: true,
+        message: data.message,
+        contact: data.contact,
+        matchedField: data.matchedField
+      });
+    }
     res.status(201).json(sendResponse(true, 'Clients created successfully', data));
   } catch (err) {
     next(err);

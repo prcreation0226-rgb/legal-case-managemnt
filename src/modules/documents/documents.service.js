@@ -1,5 +1,6 @@
 const prisma = require('../../config/db');
 const notificationsService = require('../notifications/notifications.service');
+const tasksService = require('../tasks/tasks.service');
 const fs = require('fs');
 const path = require('path');
 
@@ -145,7 +146,16 @@ const create = async (data, user) => {
     throw err;
   }
   
-  if (payload.folder_path === '') payload.folder_path = null;
+  // Auto-route client uploads to Client Uploads/[Category]
+  if (user?.role === 'client') {
+    const cat = payload.category || 'General';
+    payload.folder_path = `Client Uploads/${cat}`;
+  } else if (payload.folder_path === '') {
+    payload.folder_path = null;
+  }
+
+  const clientDirective = payload.description || '';
+  delete payload.description;
 
   const document = await prisma.document.create({ data: payload });
 
@@ -155,7 +165,7 @@ const create = async (data, user) => {
       entity_type: 'document',
       entity_id: document.id,
       action: 'uploaded',
-      description: `Document uploaded: ${document.file_name}`,
+      description: `Document uploaded: ${document.original_name || document.file_name}${clientDirective ? ` - Directive: ${clientDirective}` : ''}`,
       actor_user_id: document.uploaded_by_user_id,
     },
   });
@@ -166,15 +176,32 @@ const create = async (data, user) => {
   });
 
   if (user?.role === 'client') {
-    const targetUserId = matterDetail.assigned_lawyer_id;
+    const targetUserId = matterDetail?.assigned_lawyer_id;
     if (targetUserId) {
       await notificationsService.createNotification({
         user_id: targetUserId,
-        title: 'New Document Uploaded',
-        message: `A new document "${document.original_name}" has been added to matter ${matterDetail.matter_number}.`,
+        title: 'New Client Document Uploaded',
+        message: `Client uploaded document "${document.original_name}" to Client Uploads/${document.category || 'General'}.`,
         type: 'document',
         reference_id: document.matter_id
       });
+    }
+
+    // Auto-create staff review task for client upload
+    try {
+      await tasksService.createTask(
+        document.matter_id,
+        {
+          title: `Review Client Upload: ${document.original_name}`,
+          description: `Client uploaded a ${document.category || 'General'} document. File: ${document.original_name}.${clientDirective ? ` Client Directive: ${clientDirective}` : ''}`,
+          assigned_user_id: targetUserId || null,
+          priority: 'High',
+          status: 'Pending',
+        },
+        user
+      );
+    } catch (e) {
+      console.error('Failed to auto-create review task for client upload', e);
     }
   } else {
     // Notify all clients linked to the matter

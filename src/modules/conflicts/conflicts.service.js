@@ -3,9 +3,9 @@ const prisma = require('../../config/db');
 /**
  * Perform a conflict of interest check across multiple entities
  */
-const checkConflict = async ({ prospectiveClient, opposingParty, userId }) => {
-  const pc = (prospectiveClient || '').trim().toLowerCase();
-  const op = (opposingParty || '').trim().toLowerCase();
+const checkConflict = async ({ prospectiveClient, prospective_client_name, opposingParty, opposing_party_name, userId }) => {
+  const pc = (prospectiveClient || prospective_client_name || '').trim().toLowerCase();
+  const op = (opposingParty || opposing_party_name || '').trim().toLowerCase();
 
   if (!pc && !op) {
     throw new Error('At least one name is required for conflict check');

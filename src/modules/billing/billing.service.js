@@ -621,8 +621,12 @@ const createFromTimeEntry = async (timeEntry) => {
   });
 
   if (!invoice) {
-    const invoiceCount = await prisma.invoice.count();
-    const invoiceNumber = `INV-${new Date().getFullYear()}-${String(invoiceCount + 1).padStart(4, '0')}`;
+    let seq = (await prisma.invoice.count()) + 1;
+    let invoiceNumber = `INV-${new Date().getFullYear()}-${String(seq).padStart(4, '0')}`;
+    while (await prisma.invoice.findFirst({ where: { invoice_number: invoiceNumber } })) {
+      seq++;
+      invoiceNumber = `INV-${new Date().getFullYear()}-${String(seq).padStart(4, '0')}`;
+    }
     
     // Get matter creator or assigned lawyer for created_by
     const matter = await prisma.matter.findUnique({

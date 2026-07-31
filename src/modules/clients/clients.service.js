@@ -1,5 +1,6 @@
 const prisma = require('../../config/db');
 const bcrypt = require('bcryptjs');
+const { findDuplicateContact } = require('../contacts/contacts.service');
 
 const getAll = async (query, user) => {
   const { page = 1, limit = 10 } = query;
@@ -63,6 +64,14 @@ const create = async (data, user) => {
   }
 
   const { email, full_name, password, party_type, party_role, organization_name, contact_first_name, contact_last_name, business_address, home_address, date_of_birth, government_id, insurance_number } = data;
+
+  // Duplicate Check Rule (Priority: Phone -> Email -> GovID)
+  if (!data.bypass_duplicate) {
+    const duplicateMatch = await findDuplicateContact(data);
+    if (duplicateMatch) {
+      return duplicateMatch;
+    }
+  }
 
   // 1. Check if user already exists
   let targetUser = await prisma.user.findUnique({ where: { email } });

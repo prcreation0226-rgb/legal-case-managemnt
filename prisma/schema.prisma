@@ -185,6 +185,7 @@ model Client {
   date_of_birth     DateTime?
   government_id     String?
   insurance_number  String?
+  status            String   @default("active")
   opposing_party_name   String?
   opposing_law_firm     String?
   opposing_counsel_name String?

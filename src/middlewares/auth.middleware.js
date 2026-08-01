@@ -48,7 +48,8 @@ const protect = async (req, res, next) => {
 
     next();
   } catch (err) {
-    return res.status(401).json(sendResponse(false, 'Not authorized to access this route'));
+    console.error('Authentication middleware error:', err);
+    return res.status(500).json(sendResponse(false, 'Internal server error during authentication'));
   }
 };
 

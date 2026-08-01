@@ -147,13 +147,98 @@ const update = async (id, data, user) => {
 
 const remove = async (id, user) => {
   if (user?.role !== 'admin') {
-    const err = new Error('Only admin can delete clients');
+    const err = new Error('Only admin can hard delete clients');
     err.statusCode = 403;
     throw err;
   }
-  return await prisma.client.delete({ where: { id: parseInt(id) } });
+
+  const clientId = parseInt(id, 10);
+  const client = await prisma.client.findUnique({
+    where: { id: clientId },
+    include: {
+      matters: {
+        include: { invoices: true }
+      }
+    }
+  });
+
+  if (!client) {
+    const err = new Error('Client not found');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  // Invoice Constraint Check: Block deletion if referenced by non-void active invoices
+  const activeInvoices = (client.matters || []).flatMap(m => m.invoices || []).filter(i => i.status !== 'void');
+  if (activeInvoices.length > 0) {
+    const err = new Error(`Cannot delete client "${client.full_name}": Referenced by ${activeInvoices.length} active invoice(s). Void invoices first before hard deleting.`);
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Log Audit Entry
+  await prisma.activity.create({
+    data: {
+      entity_type: 'client',
+      entity_id: clientId,
+      action: 'client_hard_deleted',
+      description: `Admin ${user.full_name || user.email} hard-deleted client "${client.full_name}" (#${clientId})`,
+      actor_user_id: user.id
+    }
+  }).catch(() => {});
+
+  return await prisma.client.delete({ where: { id: clientId } });
 };
 
+const mergeContacts = async (primaryId, duplicateId, user) => {
+  if (user?.role !== 'admin') {
+    const err = new Error('Only admin can merge contact records');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  const pId = parseInt(primaryId, 10);
+  const dId = parseInt(duplicateId, 10);
+
+  if (pId === dId) {
+    const err = new Error('Primary and Duplicate contact IDs cannot be identical.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const [primary, duplicate] = await Promise.all([
+    prisma.client.findUnique({ where: { id: pId } }),
+    prisma.client.findUnique({ where: { id: dId } })
+  ]);
+
+  if (!primary || !duplicate) {
+    const err = new Error('Primary or Duplicate contact not found');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  // Re-point matters from duplicate to primary contact
+  await prisma.matter.updateMany({
+    where: { client_id: dId },
+    data: { client_id: pId }
+  });
+
+  // Log Audit Entry
+  await prisma.activity.create({
+    data: {
+      entity_type: 'client',
+      entity_id: pId,
+      action: 'contacts_merged',
+      description: `Admin ${user.full_name || user.email} merged duplicate contact "${duplicate.full_name}" (#${dId}) into primary contact "${primary.full_name}" (#${pId})`,
+      actor_user_id: user.id
+    }
+  }).catch(() => {});
+
+  // Remove duplicate contact record
+  await prisma.client.delete({ where: { id: dId } });
+
+  return { success: true, message: `Merged contact #${dId} into #${pId}` };
+};
 
 module.exports = {
   getAll,
@@ -161,4 +246,5 @@ module.exports = {
   create,
   update,
   remove,
+  mergeContacts
 };

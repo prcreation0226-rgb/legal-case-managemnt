@@ -236,8 +236,20 @@ const getMatterCommunications = async (matterId, query = {}, user) => {
 
 const createCommunication = async (matterId, data, user) => {
   await ensureTableExists();
-  const rawMatterId = matterId || data?.matter_id || data?.matterId;
-  const mId = rawMatterId ? parseInt(rawMatterId, 10) : 0;
+  let mId = 0;
+  let payload = data;
+  let currentUser = user;
+
+  if (typeof matterId === 'object' && matterId !== null) {
+    currentUser = data;
+    payload = matterId;
+    mId = payload.matter_id || payload.matterId ? parseInt(payload.matter_id || payload.matterId, 10) : 0;
+  } else {
+    const rawId = matterId || data?.matter_id || data?.matterId;
+    mId = rawId ? parseInt(rawId, 10) : 0;
+  }
+  if (isNaN(mId)) mId = 0;
+
   const {
     type = 'Email',
     subject,
@@ -248,7 +260,7 @@ const createCommunication = async (matterId, data, user) => {
     communication_date = null,
     contact_id = null,
     document_ids = []
-  } = data || {};
+  } = payload || {};
 
   const resolvedSubject = (subject || title || 'Email Communication').trim();
   const resolvedDesc = (message_body || description || body || '').trim();
@@ -262,7 +274,8 @@ const createCommunication = async (matterId, data, user) => {
   const cleanType = (type || 'Email').trim();
   const cleanSubject = resolvedSubject;
   const cleanDesc = resolvedDesc;
-  const cid = contact_id ? parseInt(contact_id, 10) : null;
+  const cid = contact_id && !isNaN(parseInt(contact_id, 10)) ? parseInt(contact_id, 10) : null;
+  const userId = user?.id && !isNaN(parseInt(user.id, 10)) ? parseInt(user.id, 10) : null;
 
   const cDate = communication_date
     ? `'${new Date(communication_date).toISOString().slice(0, 19).replace('T', ' ')}'`
@@ -274,15 +287,13 @@ const createCommunication = async (matterId, data, user) => {
     docIdsSql = `'${JSON.stringify(numericDocIds)}'`;
   }
 
-  const userId = user?.id ? parseInt(user.id, 10) : null;
-
   await prisma.$executeRawUnsafe(`
     INSERT INTO matter_communications (
       matter_id, type, subject, description, communication_date, contact_id, document_ids, created_by, created_at, updated_at
     )
     VALUES (
       ${mId}, '${cleanType.replace(/'/g, "''")}', '${cleanSubject.replace(/'/g, "''")}', ${cleanDesc ? `'${cleanDesc.replace(/'/g, "''")}'` : 'NULL'},
-      ${cDate}, ${cid || 'NULL'}, ${docIdsSql}, ${userId || 'NULL'}, NOW(), NOW()
+      ${cDate}, ${cid ? cid : 'NULL'}, ${docIdsSql}, ${userId ? userId : 'NULL'}, NOW(), NOW()
     )
   `);
 
@@ -525,6 +536,86 @@ const markRead = async (commId, user) => {
   return { id: commId, read: true };
 };
 
+const autoSuggestMatterForEmail = async (senderEmail, recipientEmail) => {
+  if (!senderEmail && !recipientEmail) return null;
+  const emails = [senderEmail, recipientEmail].filter(Boolean).map(e => e.toLowerCase().trim());
+
+  const matters = await prisma.matter.findMany({
+    take: 50,
+    include: {
+      client: { select: { id: true, email: true, full_name: true } }
+    }
+  });
+
+  for (const m of matters) {
+    if (m.client?.email && emails.includes(m.client.email.toLowerCase().trim())) {
+      return { matter: m, matched_by: 'client_email', matched_email: m.client.email };
+    }
+    if (m.parties_data) {
+      try {
+        const parties = Array.isArray(m.parties_data) ? m.parties_data : JSON.parse(m.parties_data);
+        for (const p of parties) {
+          if (p.email && emails.includes(p.email.toLowerCase().trim())) {
+            return { matter: m, matched_by: 'party_email', matched_email: p.email };
+          }
+        }
+      } catch (e) {}
+    }
+  }
+
+  return null;
+};
+
+const fileEmailToMatter = async (emailData, matterId, user) => {
+  await ensureTableExists();
+  const mId = parseInt(matterId, 10);
+  const subject = emailData.subject || 'Filed Email Thread';
+  const description = emailData.body || emailData.description || emailData.snippet || '';
+  const senderEmail = emailData.sender || emailData.from || '';
+
+  const createdComm = await createCommunication({
+    matter_id: mId,
+    type: 'Email',
+    subject,
+    description: `From: ${senderEmail}\n\n${description}`,
+    communication_date: emailData.date || new Date().toISOString()
+  }, user);
+
+  // Copy email attachments into Matter Document repository
+  if (Array.isArray(emailData.attachments) && emailData.attachments.length > 0) {
+    for (const att of emailData.attachments) {
+      const fName = att.filename || att.name || 'Email Attachment.pdf';
+      const mType = att.contentType || 'application/pdf';
+      const fUrl = att.url || att.path || '/documents/sample.pdf';
+      await prisma.document.create({
+        data: {
+          matter_id: mId,
+          file_name: fName,
+          original_name: fName,
+          mime_type: mType,
+          file_path: fUrl,
+          file_size: att.size || 1024,
+          uploaded_by_user_id: user?.id || 1,
+          category: 'Email Attachment'
+        }
+      }).catch((e) => { console.warn('Attachment copy warning:', e.message); });
+    }
+  }
+
+  await prisma.activity.create({
+    data: {
+      matter_id: mId,
+      entity_type: 'email',
+      entity_id: mId,
+      action: 'filed_to_matter',
+      description: `Filed email "${subject}" to matter #${mId}`,
+      actor_user_id: user?.id || null
+    }
+  }).catch(() => {});
+
+  return { success: true, communication: createdComm };
+};
+
 module.exports = {
   getMatterCommunications,
   getAllCommunications,
@@ -532,5 +623,7 @@ module.exports = {
   updateCommunication,
   deleteCommunication,
   markMatterRead,
-  markRead
+  markRead,
+  autoSuggestMatterForEmail,
+  fileEmailToMatter
 };

@@ -266,6 +266,8 @@ const getById = async (id, user, query = {}) => {
       invoices: {
         include: { payments: true }
       },
+      time_entries: true,
+      expenses: true,
       activities: {
         orderBy: { created_at: 'desc' },
         take: 20,

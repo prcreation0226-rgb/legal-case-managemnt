@@ -8,6 +8,7 @@ router.use(protect);
 router.get('/', controller.getAll);
 router.get('/:id', controller.getById);
 router.post('/', controller.create);
+router.post('/merge', controller.merge);
 router.put('/:id', controller.update);
 router.delete('/:id', controller.remove);
 

@@ -98,12 +98,55 @@ const cloneToMatter = async (templateId, matterId, user) => {
       throw err;
     }
 
+    // Parse nested matter data
+    let parties = [];
+    if (matter.parties_data) {
+      try {
+        parties = Array.isArray(matter.parties_data) ? matter.parties_data : JSON.parse(matter.parties_data);
+      } catch (e) {}
+    }
+
+    let vehicles = [];
+    if (matter.vehicles_data) {
+      try {
+        vehicles = Array.isArray(matter.vehicles_data) ? matter.vehicles_data : JSON.parse(matter.vehicles_data);
+      } catch (e) {}
+    }
+
+    const intake = matter.intake_answers || {};
+    const defendantParty = parties.find(p => (p.role || '').toLowerCase().includes('defendant') || (p.role || '').toLowerCase().includes('opposing')) || parties[0] || {};
+    const firstVehicle = vehicles[0] || {};
+
     let content = template.content || '';
-    
+
+    // Standard Client & Matter Tags
+    content = content.replace(/{{client\.name}}/g, matter.client?.full_name || '');
     content = content.replace(/{{client_name}}/g, matter.client?.full_name || '');
-    content = content.replace(/{{matter_title}}/g, matter.title || '');
-    content = content.replace(/{{case_number}}/g, matter.matter_number || '');
+    content = content.replace(/{{client\.address}}/g, matter.client?.home_address || matter.client?.address || '');
+    content = content.replace(/{{client\.phone}}/g, matter.client?.phone || '');
+    content = content.replace(/{{client\.email}}/g, matter.client?.email || '');
+
+    // Opposing Party & Counsel Tags
+    content = content.replace(/{{opposing_party\.name}}/g, defendantParty.full_name || defendantParty.name || matter.opposing_party || 'Opposing Party');
+    content = content.replace(/{{opposing_party}}/g, defendantParty.full_name || defendantParty.name || matter.opposing_party || 'Opposing Party');
+    content = content.replace(/{{opposing_counsel\.name}}/g, intake.opposing_counsel_name || 'Opposing Counsel');
+
+    // Insurance & Claims Tags
+    content = content.replace(/{{insurance\.company}}/g, intake.insurance_company || 'Insurance Carrier');
+    content = content.replace(/{{insurance\.claim_no}}/g, intake.claim_number || intake.insurance_claim_no || 'CLM-PENDING');
+    content = content.replace(/{{insurance\.policy_no}}/g, intake.policy_number || 'POL-PENDING');
+
+    // Vehicles & Incidents Tags
+    content = content.replace(/{{vehicle\.make_model}}/g, firstVehicle.make ? `${firstVehicle.year || ''} ${firstVehicle.make} ${firstVehicle.model}` : 'Vehicle');
+    content = content.replace(/{{vehicle\.vin}}/g, firstVehicle.vin || 'VIN-PENDING');
+    content = content.replace(/{{vehicle\.license_plate}}/g, firstVehicle.license_plate || 'PLATE-PENDING');
+    content = content.replace(/{{incident\.date}}/g, matter.date_of_loss ? new Date(matter.date_of_loss).toLocaleDateString() : 'Date of Loss');
+
+    // Matter Info Tags
+    content = content.replace(/{{matter\.no}}/g, matter.matter_number || '');
     content = content.replace(/{{matter_number}}/g, matter.matter_number || '');
+    content = content.replace(/{{case_number}}/g, matter.matter_number || '');
+    content = content.replace(/{{matter_title}}/g, matter.title || '');
     content = content.replace(/{{lawyer_name}}/g, matter.assigned_lawyer?.full_name || '');
     content = content.replace(/{{date}}/g, new Date().toLocaleDateString());
     content = content.replace(/{{current_date}}/g, new Date().toLocaleDateString());

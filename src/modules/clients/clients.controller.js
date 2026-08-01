@@ -54,10 +54,21 @@ const remove = async (req, res, next) => {
   }
 };
 
+const merge = async (req, res, next) => {
+  try {
+    const { primaryId, duplicateId } = req.body;
+    const data = await service.mergeContacts(primaryId, duplicateId, req.user);
+    res.status(200).json(sendResponse(true, 'Contacts merged successfully', data));
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   getAll,
   getById,
   create,
   update,
   remove,
+  merge
 };

@@ -92,6 +92,12 @@ const create = async (data, user) => {
     });
   }
 
+  if (data.date_of_birth) {
+    data.date_of_birth = new Date(data.date_of_birth);
+  } else if (data.date_of_birth === '') {
+    data.date_of_birth = null;
+  }
+
   // 3. Create client linked to user
   return await prisma.client.create({
     data: {
@@ -136,6 +142,13 @@ const update = async (id, data, user) => {
     delete data.is_portal_enabled;
     delete data.user_id;
   }
+
+  if (data.date_of_birth) {
+    data.date_of_birth = new Date(data.date_of_birth);
+  } else if (data.date_of_birth === '') {
+    data.date_of_birth = null;
+  }
+
   return await prisma.client.update({
     where: { id: parseInt(id) },
     data: {

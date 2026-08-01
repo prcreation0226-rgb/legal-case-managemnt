@@ -220,6 +220,7 @@ model Matter {
   date_of_loss         DateTime?
   sol_term             String?
   sol_date             DateTime?
+  tracking_type        String?      @default("court")
   trial_date           DateTime?
   case_number          String?
   judge_name           String?

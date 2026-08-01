@@ -29,9 +29,10 @@ const start = async (userId, matterId) => {
   // Check for active timer
   const active = await getActive(userId);
   if (active) {
-    const err = new Error('A timer is already running. Please stop it before starting a new one.');
-    err.statusCode = 400;
-    throw err;
+    if (active.matter_id === Number(matterId)) {
+      return active;
+    }
+    await stop(userId, active.id);
   }
 
   return await prisma.timeEntry.create({

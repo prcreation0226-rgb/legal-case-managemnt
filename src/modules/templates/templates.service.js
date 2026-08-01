@@ -1,5 +1,16 @@
 const prisma = require('../../config/db');
 
+const formatUSPhone = (value) => {
+  if (!value) return '';
+  const clean = value.replace(/[^\d]/g, '');
+  const length = clean.length;
+  if (length === 0) return value;
+  if (length === 10) {
+    return `(${clean.slice(0, 3)}) ${clean.slice(3, 6)}-${clean.slice(6, 10)}`;
+  }
+  return value;
+};
+
 const getAll = async (query, user) => {
   const { category, page = 1, limit = 50 } = query;
   const take = parseInt(limit);
@@ -123,7 +134,7 @@ const cloneToMatter = async (templateId, matterId, user) => {
     content = content.replace(/{{client\.name}}/g, matter.client?.full_name || '');
     content = content.replace(/{{client_name}}/g, matter.client?.full_name || '');
     content = content.replace(/{{client\.address}}/g, matter.client?.home_address || matter.client?.address || '');
-    content = content.replace(/{{client\.phone}}/g, matter.client?.phone || '');
+    content = content.replace(/{{client\.phone}}/g, formatUSPhone(matter.client?.phone || ''));
     content = content.replace(/{{client\.email}}/g, matter.client?.email || '');
 
     // Opposing Party & Counsel Tags
@@ -154,7 +165,7 @@ const cloneToMatter = async (templateId, matterId, user) => {
     const company = await tx.companyProfile.findFirst() || {};
     content = content.replace(/{{firm_name}}/g, company.company_name || '');
     content = content.replace(/{{firm_address}}/g, company.address || '');
-    content = content.replace(/{{firm_phone}}/g, company.phone || '');
+    content = content.replace(/{{firm_phone}}/g, formatUSPhone(company.phone || ''));
     content = content.replace(/{{firm_email}}/g, company.email || '');
     content = content.replace(/{{firm_logo}}/g, company.logo_url ? `<img src="${company.logo_url}" alt="Firm Logo" style="max-width:200px;" />` : '');
 

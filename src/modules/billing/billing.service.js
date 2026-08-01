@@ -971,6 +971,67 @@ const sendInvoice = async (id, user) => {
   }
 };
 
+const IMMIGRATION_APPEARANCE_RATE_CARD = [
+  { id: 'app_master_in_person', title: 'Master Calendar Hearing', mode: 'In-Person', rate: 600 },
+  { id: 'app_master_virtual', title: 'Master Calendar Hearing', mode: 'Virtual / Webex', rate: 400 },
+  { id: 'app_individual_in_person', title: 'Individual Merits Hearing', mode: 'In-Person', rate: 1800 },
+  { id: 'app_individual_virtual', title: 'Individual Merits Hearing', mode: 'Virtual / Webex', rate: 1200 },
+  { id: 'app_uscis_in_person', title: 'USCIS Field Office Interview', mode: 'In-Person', rate: 850 },
+  { id: 'app_uscis_virtual', title: 'USCIS Field Office Interview', mode: 'Virtual / Phone', rate: 550 },
+  { id: 'app_asylum_in_person', title: 'Asylum Office Interview', mode: 'In-Person', rate: 1000 },
+  { id: 'app_credible_fear', title: 'Credible Fear Interview', mode: 'In-Person', rate: 900 }
+];
+
+async function getImmigrationAppearanceRateCard() {
+  return IMMIGRATION_APPEARANCE_RATE_CARD;
+}
+
+async function getARAgingAndRollups() {
+  const invoices = await prisma.invoice.findMany({
+    include: { matter: true }
+  });
+
+  const now = new Date();
+  let current0to30 = 0;
+  let days31to60 = 0;
+  let days61to90 = 0;
+  let days90Plus = 0;
+
+  const practiceAreaRevenue = {};
+  const referralRevenue = {};
+
+  for (const inv of invoices) {
+    const due = inv.due_date ? new Date(inv.due_date) : now;
+    const diffDays = Math.floor((now - due) / (1000 * 60 * 60 * 24));
+    const unpaid = Math.max(0, (inv.total_amount || 0) - (inv.paid_amount || 0));
+
+    if (unpaid > 0) {
+      if (diffDays <= 30) current0to30 += unpaid;
+      else if (diffDays <= 60) days31to60 += unpaid;
+      else if (diffDays <= 90) days61to90 += unpaid;
+      else days90Plus += unpaid;
+    }
+
+    const pa = inv.matter?.practice_area || 'Personal Injury';
+    practiceAreaRevenue[pa] = (practiceAreaRevenue[pa] || 0) + (inv.paid_amount || 0);
+
+    const ref = inv.matter?.lead_source || 'Direct Intake';
+    referralRevenue[ref] = (referralRevenue[ref] || 0) + (inv.paid_amount || 0);
+  }
+
+  return {
+    ar_aging: {
+      current_0_30: current0to30,
+      days_31_60: days31to60,
+      days_61_90: days61to90,
+      days_90_plus: days90Plus,
+      total_ar: current0to30 + days31to60 + days61to90 + days90Plus
+    },
+    practice_area_revenue: practiceAreaRevenue,
+    referral_revenue: referralRevenue
+  };
+}
+
 module.exports = {
   getAll,
   getById,
@@ -986,4 +1047,6 @@ module.exports = {
   applyTrustToInvoice,
   calculateInvoiceFields,
   sendInvoice,
+  getImmigrationAppearanceRateCard,
+  getARAgingAndRollups
 };

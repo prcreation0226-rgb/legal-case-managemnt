@@ -801,6 +801,21 @@ const update = async (id, data, user) => {
   } else {
     prismaData.sol_date = null;
   }
+
+  if (existing.client_id && (retaining_client_name || retaining_client_email || retaining_client_phone || retaining_client_address || retaining_client_dob || retaining_client_gov_id)) {
+    const clientData = {};
+    if (retaining_client_name) clientData.full_name = retaining_client_name.trim();
+    if (retaining_client_email) clientData.email = retaining_client_email.trim();
+    if (retaining_client_phone) clientData.phone = retaining_client_phone.trim();
+    if (retaining_client_address) clientData.home_address = retaining_client_address.trim();
+    if (retaining_client_dob) clientData.date_of_birth = new Date(retaining_client_dob);
+    if (retaining_client_gov_id) clientData.government_id = retaining_client_gov_id.trim();
+    
+    await prisma.client.update({
+      where: { id: existing.client_id },
+      data: clientData
+    });
+  }
   const matter = await prisma.matter.update({
     where: { id: idInt },
     data: prismaData,

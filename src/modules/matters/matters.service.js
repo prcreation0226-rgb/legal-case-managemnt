@@ -586,6 +586,24 @@ const create = async (data, user) => {
   if (payload.trial_date) payload.trial_date = new Date(payload.trial_date);
   if (payload.next_hearing) payload.next_hearing = new Date(payload.next_hearing);
 
+  if (payload.date_of_loss) {
+    if (payload.sol_term === '1_year') {
+      const d = new Date(payload.date_of_loss);
+      d.setFullYear(d.getFullYear() + 1);
+      payload.sol_date = d;
+    } else if (payload.sol_term === '2_years') {
+      const d = new Date(payload.date_of_loss);
+      d.setFullYear(d.getFullYear() + 2);
+      payload.sol_date = d;
+    } else if (payload.sol_term === 'custom' && payload.sol_date) {
+      payload.sol_date = new Date(payload.sol_date);
+    } else {
+      payload.sol_date = null;
+    }
+  } else {
+    payload.sol_date = null;
+  }
+
   const matter = await prisma.matter.create({ data: payload });
   
   // Sync to calendar
@@ -700,6 +718,29 @@ const update = async (id, data, user) => {
   }
   if (prismaData.trial_date) {
     prismaData.trial_date = new Date(prismaData.trial_date);
+  }
+
+  const finalDateOfLoss = prismaData.date_of_loss !== undefined ? prismaData.date_of_loss : existing.date_of_loss;
+  const finalSolTerm = prismaData.sol_term !== undefined ? prismaData.sol_term : existing.sol_term;
+  
+  if (finalDateOfLoss) {
+    if (finalSolTerm === '1_year') {
+      const d = new Date(finalDateOfLoss);
+      d.setFullYear(d.getFullYear() + 1);
+      prismaData.sol_date = d;
+    } else if (finalSolTerm === '2_years') {
+      const d = new Date(finalDateOfLoss);
+      d.setFullYear(d.getFullYear() + 2);
+      prismaData.sol_date = d;
+    } else if (finalSolTerm === 'custom') {
+      if (prismaData.sol_date !== undefined) {
+        prismaData.sol_date = prismaData.sol_date ? new Date(prismaData.sol_date) : null;
+      }
+    } else {
+      prismaData.sol_date = null;
+    }
+  } else {
+    prismaData.sol_date = null;
   }
   const matter = await prisma.matter.update({
     where: { id: idInt },

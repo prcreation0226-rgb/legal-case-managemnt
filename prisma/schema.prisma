@@ -227,6 +227,8 @@ model Matter {
   judge_name           String?
   court_name           String?
   court_address        String?
+  court_department     String?
+  hearing_time         String?
   created_by_user_id   Int
   created_at           DateTime     @default(now())
   updated_at           DateTime     @updatedAt
@@ -956,5 +958,25 @@ model IntakeModuleFieldDefinition {
   module         IntakeModuleDefinition @relation(fields: [module_id], references: [id], onDelete: Cascade)
 
   @@map("intake_module_field_definitions")
+}
+
+model MatterCommunication {
+  id                 Int      @id @default(autoincrement())
+  matter_id          Int
+  type               String?  @default("Note") @db.VarChar(50)
+  subject            String   @db.VarChar(255)
+  description        String?  @db.LongText
+  communication_date DateTime @default(now())
+  contact_id         Int?
+  document_ids       Json?
+  created_by         Int?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  @@index([matter_id], map: "idx_matter")
+  @@index([type], map: "idx_type")
+  @@index([contact_id], map: "idx_contact")
+  @@index([communication_date], map: "idx_comm_date")
+  @@map("matter_communications")
 }
 

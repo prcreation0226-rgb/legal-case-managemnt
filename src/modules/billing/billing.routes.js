@@ -13,6 +13,10 @@ router.post('/trust-accounts/deposit', controller.depositTrust);
 router.post('/trust-accounts/apply', controller.applyTrustToInvoice);
 router.get('/trust-accounts/:id/transactions', controller.getTrustTransactions);
 
+// Billing Rollups & Rate Cards
+router.get('/rate-card/immigration', controller.getRateCard);
+router.get('/rollups', controller.getRollups);
+
 // Invoice Routes
 router.get('/:id/pdf', controller.downloadPdf);
 router.get('/:id', controller.getById);

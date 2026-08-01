@@ -104,9 +104,19 @@ const sortPartiesByRole = (parties) => {
   });
 };
 
-const nextMatterNumber = async () => {
+const nextMatterNumber = async (practiceArea = null) => {
+  const practiceAreaPrefixes = {
+    'PI - Auto / Property Damage': 'PI',
+    'Catastrophic / Product Liability': 'PL',
+    'Habitability / Premises': 'HB',
+    'Employment': 'EM',
+    'Civil Rights / Discrimination': 'CR',
+    'Immigration': 'IM',
+    'Personal Injury': 'PI'
+  };
+  const prefix = practiceAreaPrefixes[practiceArea] || (practiceArea ? practiceArea.substring(0, 2).toUpperCase() : 'MT');
   const count = await prisma.matter.count();
-  return `MT-${String(count + 1).padStart(5, '0')}`;
+  return `${prefix}-${new Date().getFullYear()}-${String(count + 1).padStart(4, '0')}`;
 };
 
 const getAll = async (query, user) => {
@@ -396,7 +406,7 @@ const create = async (data, user) => {
   const { 
     custom_fields, clientIds, clientId, client_id, inlineParties, parties_data, vehicles_data, intake_answers, 
     retaining_client_name, retaining_client_email, retaining_client_phone, retaining_client_address, retaining_client_dob, retaining_client_gov_id,
-    fee_type, hourly_rate, contingency_rate, retainer_amount, lead_source, existing_client_select, selected_client_id,
+    fee_type, hourly_rate, contingency_rate, retainer_amount, lead_source, referral_source, existing_client_select, selected_client_id,
     ...payload 
   } = data;
 
@@ -418,6 +428,18 @@ const create = async (data, user) => {
   }
   if (intake_answers) {
     payload.intake_answers = typeof intake_answers === 'string' ? JSON.parse(intake_answers) : intake_answers;
+  }
+  if (typeof payload.intake_answers !== 'object' || payload.intake_answers === null) {
+    payload.intake_answers = {};
+  }
+  if (!payload.intake_answers.current_stage) {
+    payload.intake_answers.current_stage = 'Intake';
+  }
+  if (lead_source || data.referral_source) {
+    payload.intake_answers.referral_source = lead_source || data.referral_source;
+  }
+  if (fee_type || data.fee_type) {
+    payload.intake_answers.fee_type = fee_type || data.fee_type;
   }
 
   let primaryClientId = null;
@@ -578,7 +600,7 @@ const create = async (data, user) => {
   };
 
   if (!payload.matter_number) {
-    payload.matter_number = await nextMatterNumber();
+    payload.matter_number = await nextMatterNumber(payload.practice_area);
   }
   
   if (payload.initial_filing_date) payload.initial_filing_date = new Date(payload.initial_filing_date);
@@ -720,6 +742,7 @@ const update = async (id, data, user) => {
     prismaData.trial_date = new Date(prismaData.trial_date);
   }
 
+<<<<<<< HEAD
   const finalDateOfLoss = prismaData.date_of_loss !== undefined ? prismaData.date_of_loss : existing.date_of_loss;
   const finalSolTerm = prismaData.sol_term !== undefined ? prismaData.sol_term : existing.sol_term;
   
@@ -742,6 +765,27 @@ const update = async (id, data, user) => {
   } else {
     prismaData.sol_date = null;
   }
+=======
+  if (prismaData.stage || (prismaData.status && !['pending', 'active', 'completed'].includes(String(prismaData.status).toLowerCase()))) {
+    const rawStage = String(prismaData.stage || prismaData.status);
+    const lower = rawStage.toLowerCase();
+
+    let answers = prismaData.intake_answers || (existing.intake_answers ? (typeof existing.intake_answers === 'string' ? JSON.parse(existing.intake_answers) : existing.intake_answers) : {});
+    if (typeof answers !== 'object' || answers === null) answers = {};
+    answers.current_stage = rawStage;
+    prismaData.intake_answers = answers;
+
+    delete prismaData.stage;
+    if (['resolution', 'completed', 'decision', 'closed'].includes(lower)) {
+      prismaData.status = 'completed';
+    } else if (['intake', 'pending'].includes(lower)) {
+      prismaData.status = 'pending';
+    } else {
+      prismaData.status = 'active';
+    }
+  }
+
+>>>>>>> b1465d989bb43cfce0c9a80006333f87aaf0f4eb
   const matter = await prisma.matter.update({
     where: { id: idInt },
     data: prismaData,
@@ -755,7 +799,7 @@ const update = async (id, data, user) => {
     console.error('Failed to sync matter dates to calendar on update', e);
   }
 
-  if (data.status && data.status !== existing.status) {
+  if (matter.status !== existing.status) {
     const actorId = updated_by_user_id ?? existing.created_by_user_id;
 
     await prisma.activity.create({
@@ -764,7 +808,7 @@ const update = async (id, data, user) => {
         entity_type: 'matter',
         entity_id: matter.id,
         action: 'status_updated',
-        description: `Matter status changed to ${data.status}`,
+        description: `Matter status changed to ${matter.status}`,
         actor_user_id: actorId,
       },
     });
@@ -773,7 +817,7 @@ const update = async (id, data, user) => {
       data: {
         matter_id: matter.id,
         old_status: existing.status,
-        new_status: data.status,
+        new_status: matter.status,
         changed_by_user_id: actorId,
       },
     });

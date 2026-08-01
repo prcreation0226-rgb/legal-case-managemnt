@@ -112,6 +112,24 @@ const sendInvoice = async (req, res, next) => {
   }
 };
 
+const getRateCard = async (req, res, next) => {
+  try {
+    const data = await service.getImmigrationAppearanceRateCard();
+    res.status(200).json(sendResponse(true, 'Immigration appearance rate card fetched successfully', data));
+  } catch (err) {
+    next(err);
+  }
+};
+
+const getRollups = async (req, res, next) => {
+  try {
+    const data = await service.getARAgingAndRollups();
+    res.status(200).json(sendResponse(true, 'AR Aging and Rollups fetched successfully', data));
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   getAll,
   getById,
@@ -125,4 +143,6 @@ module.exports = {
   depositTrust,
   applyTrustToInvoice,
   sendInvoice,
+  getRateCard,
+  getRollups
 };

@@ -10,6 +10,7 @@ router.use(authorize('admin'));
 router.post('/generate', reportsController.generateReport);
 router.get('/', reportsController.listReports);
 router.get('/marketing', reportsController.getMarketing);
+router.get('/referrals', reportsController.getReferralAnalytics);
 router.get('/:id', reportsController.getReport);
 router.get('/:id/download', reportsController.downloadReport);
 

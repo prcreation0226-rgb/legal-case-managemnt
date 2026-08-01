@@ -444,6 +444,20 @@ const create = async (data, user) => {
     payload.intake_answers.fee_type = fee_type || data.fee_type;
   }
 
+  // Referral Channel & CRPC 1.5.1 Compliance attributes
+  if (data.referral_contact_id !== undefined) payload.intake_answers.referral_contact_id = data.referral_contact_id;
+  if (data.referral_contact_name !== undefined) payload.intake_answers.referral_contact_name = data.referral_contact_name;
+  if (data.referral_category !== undefined) payload.intake_answers.referral_category = data.referral_category;
+  if (data.referral_agreement_on_file !== undefined) payload.intake_answers.referral_agreement_on_file = !!data.referral_agreement_on_file;
+  if (data.referral_agreement_doc_url !== undefined) payload.intake_answers.referral_agreement_doc_url = data.referral_agreement_doc_url;
+  if (data.referral_fee_type !== undefined) payload.intake_answers.referral_fee_type = data.referral_fee_type;
+  if (data.referral_fee_value !== undefined) payload.intake_answers.referral_fee_value = data.referral_fee_value;
+  if (data.crpc_151_consent_obtained !== undefined) payload.intake_answers.crpc_151_consent_obtained = !!data.crpc_151_consent_obtained;
+  if (data.crpc_151_consent_date !== undefined) payload.intake_answers.crpc_151_consent_date = data.crpc_151_consent_date;
+  if (data.crpc_151_doc_url !== undefined) payload.intake_answers.crpc_151_doc_url = data.crpc_151_doc_url;
+  if (data.crpc_151_disclosure_details !== undefined) payload.intake_answers.crpc_151_disclosure_details = data.crpc_151_disclosure_details;
+  if (data.referral_payouts !== undefined) payload.intake_answers.referral_payouts = data.referral_payouts;
+
   let primaryClientId = null;
 
   // 1. Validate explicit clientId / client_id or first ID in clientIds array
@@ -728,9 +742,30 @@ const update = async (id, data, user) => {
   if (vehicles_data !== undefined) {
     prismaData.vehicles_data = typeof vehicles_data === 'string' ? JSON.parse(vehicles_data) : vehicles_data;
   }
-  if (intake_answers !== undefined) {
-    prismaData.intake_answers = typeof intake_answers === 'string' ? JSON.parse(intake_answers) : intake_answers;
+  let mergedIntake = {};
+  if (existing.intake_answers) {
+    mergedIntake = typeof existing.intake_answers === 'string' ? JSON.parse(existing.intake_answers) : existing.intake_answers;
   }
+  if (intake_answers !== undefined) {
+    const passedIntake = typeof intake_answers === 'string' ? JSON.parse(intake_answers) : intake_answers;
+    mergedIntake = { ...mergedIntake, ...passedIntake };
+  }
+
+  if (data.referral_source !== undefined) mergedIntake.referral_source = data.referral_source;
+  if (data.referral_contact_id !== undefined) mergedIntake.referral_contact_id = data.referral_contact_id;
+  if (data.referral_contact_name !== undefined) mergedIntake.referral_contact_name = data.referral_contact_name;
+  if (data.referral_category !== undefined) mergedIntake.referral_category = data.referral_category;
+  if (data.referral_agreement_on_file !== undefined) mergedIntake.referral_agreement_on_file = !!data.referral_agreement_on_file;
+  if (data.referral_agreement_doc_url !== undefined) mergedIntake.referral_agreement_doc_url = data.referral_agreement_doc_url;
+  if (data.referral_fee_type !== undefined) mergedIntake.referral_fee_type = data.referral_fee_type;
+  if (data.referral_fee_value !== undefined) mergedIntake.referral_fee_value = data.referral_fee_value;
+  if (data.crpc_151_consent_obtained !== undefined) mergedIntake.crpc_151_consent_obtained = !!data.crpc_151_consent_obtained;
+  if (data.crpc_151_consent_date !== undefined) mergedIntake.crpc_151_consent_date = data.crpc_151_consent_date;
+  if (data.crpc_151_doc_url !== undefined) mergedIntake.crpc_151_doc_url = data.crpc_151_doc_url;
+  if (data.crpc_151_disclosure_details !== undefined) mergedIntake.crpc_151_disclosure_details = data.crpc_151_disclosure_details;
+  if (data.referral_payouts !== undefined) mergedIntake.referral_payouts = data.referral_payouts;
+
+  prismaData.intake_answers = mergedIntake;
   if (prismaData.next_hearing) {
     prismaData.next_hearing = new Date(prismaData.next_hearing);
   }

@@ -30,8 +30,59 @@ async function getLinkedMattersCount(clientId) {
   return countAsPrimary + countInPartiesData;
 }
 
+function parseContactNotes(notesStr) {
+  if (!notesStr) return { notes: '', is_referral_source: false, referral_category: 'attorney', default_fee_terms: '', driver_license: '', alien_registration_number: '' };
+  try {
+    if (typeof notesStr === 'string' && notesStr.startsWith('{"__meta":')) {
+      const parsed = JSON.parse(notesStr);
+      return {
+        notes: parsed.text || '',
+        is_referral_source: !!parsed.__meta?.is_referral_source,
+        referral_category: parsed.__meta?.referral_category || 'attorney',
+        default_fee_terms: parsed.__meta?.default_fee_terms || '',
+        driver_license: parsed.__meta?.driver_license || '',
+        alien_registration_number: parsed.__meta?.alien_registration_number || ''
+      };
+    }
+  } catch (e) {}
+  return { notes: notesStr, is_referral_source: false, referral_category: 'attorney', default_fee_terms: '', driver_license: '', alien_registration_number: '' };
+}
+
+function serializeContactNotes(rawNotes, meta = {}) {
+  const isReferral = meta.is_referral_source !== undefined ? !!meta.is_referral_source : false;
+  const category = meta.referral_category || 'attorney';
+  const feeTerms = meta.default_fee_terms || '';
+  const dl = meta.driver_license || '';
+  const aNum = meta.alien_registration_number || '';
+
+  return JSON.stringify({
+    text: rawNotes || '',
+    __meta: {
+      is_referral_source: isReferral,
+      referral_category: category,
+      default_fee_terms: feeTerms,
+      driver_license: dl,
+      alien_registration_number: aNum
+    }
+  });
+}
+
+function enrichContactData(c, linkedCount = 0) {
+  const parsed = parseContactNotes(c.notes);
+  return {
+    ...c,
+    notes: parsed.notes,
+    is_referral_source: parsed.is_referral_source,
+    referral_category: parsed.referral_category,
+    default_fee_terms: parsed.default_fee_terms,
+    driver_license: parsed.driver_license,
+    alien_registration_number: parsed.alien_registration_number,
+    linked_matters_count: linkedCount
+  };
+}
+
 const getAll = async (query = {}, user) => {
-  const { page = 1, limit = 10, q = '', party_type = 'All' } = query;
+  const { page = 1, limit = 50, q = '', party_type = 'All', is_referral_source } = query;
   const take = parseInt(limit, 10);
   const skip = (parseInt(page) - 1) * take;
 
@@ -51,161 +102,95 @@ const getAll = async (query = {}, user) => {
     ];
   }
 
-  const [total, contacts] = await Promise.all([
-    prisma.client.count({ where }),
+  const [rawContacts, total] = await Promise.all([
     prisma.client.findMany({
       where,
-      skip,
       take,
+      skip,
       orderBy: { updated_at: 'desc' }
-    })
+    }),
+    prisma.client.count({ where })
   ]);
 
-  // Enrich with linked matters count
-  const enriched = await Promise.all(
-    contacts.map(async c => {
-      const linkedCount = await getLinkedMattersCount(c.id);
-      return {
-        ...c,
-        linked_matters_count: linkedCount
-      };
-    })
-  );
+  let contacts = [];
+  for (const c of rawContacts) {
+    const linkedCount = await getLinkedMattersCount(c.id);
+    contacts.push(enrichContactData(c, linkedCount));
+  }
+
+  if (is_referral_source === 'true' || is_referral_source === true) {
+    contacts = contacts.filter(c => c.is_referral_source);
+  }
 
   return {
-    contacts: enriched,
+    contacts,
     total,
-    page: parseInt(page, 10),
+    page: parseInt(page),
     limit: take,
     total_pages: Math.ceil(total / take)
   };
 };
 
 const search = async (q = '', user) => {
-  if (!q || !q.trim()) {
-    const contacts = await prisma.client.findMany({
-      take: 20,
-      orderBy: { updated_at: 'desc' }
-    });
-    return await Promise.all(
-      contacts.map(async c => ({
-        ...c,
-        linked_matters_count: await getLinkedMattersCount(c.id)
-      }))
-    );
-  }
-
-  const s = q.trim();
   const contacts = await prisma.client.findMany({
     where: {
       OR: [
-        { full_name: { contains: s } },
-        { email: { contains: s } },
-        { phone: { contains: s } },
-        { organization_name: { contains: s } }
+        { full_name: { contains: q } },
+        { email: { contains: q } },
+        { phone: { contains: q } },
+        { organization_name: { contains: q } }
       ]
     },
-    take: 30,
+    take: 20,
     orderBy: { updated_at: 'desc' }
   });
 
-  return await Promise.all(
-    contacts.map(async c => ({
-      ...c,
-      linked_matters_count: await getLinkedMattersCount(c.id)
-    }))
-  );
+  const enriched = [];
+  for (const c of contacts) {
+    const linkedCount = await getLinkedMattersCount(c.id);
+    enriched.push(enrichContactData(c, linkedCount));
+  }
+  return enriched;
 };
 
 const getById = async (id, user) => {
-  const contact = await prisma.client.findUnique({
-    where: { id: parseInt(id, 10) }
+  const contactId = parseInt(id, 10);
+  const c = await prisma.client.findUnique({
+    where: { id: contactId }
   });
-  if (!contact) return null;
-  const linkedCount = await getLinkedMattersCount(contact.id);
-  return {
-    ...contact,
-    linked_matters_count: linkedCount
-  };
+  if (!c) return null;
+
+  const linkedCount = await getLinkedMattersCount(c.id);
+  return enrichContactData(c, linkedCount);
 };
 
-/**
- * Find existing duplicate contact by Phone, Email, or Government ID/Driver License.
- * Priority: 1. Phone, 2. Email, 3. Driver License / SSN / Government ID
- */
 const findDuplicateContact = async (data = {}) => {
-  const cleanPhone = (data.phone || data.retaining_client_phone || '').trim();
-  const cleanEmail = (data.email || data.retaining_client_email || '').trim();
-  const cleanGovId = (data.government_id || data.retaining_client_gov_id || data.driver_license || data.ssn || '').trim();
+  const { email, phone, government_id, full_name } = data;
 
-  // 1. Phone check (Highest Priority)
-  if (cleanPhone) {
-    const existing = await prisma.client.findFirst({
-      where: { phone: { equals: cleanPhone } }
+  if (phone && phone.trim()) {
+    const match = await prisma.client.findFirst({
+      where: { phone: phone.trim() }
     });
-    if (existing) {
+    if (match) {
       return {
         duplicate: true,
-        matchedField: 'phone',
-        message: 'A contact with this phone number already exists.',
-        contact: {
-          id: existing.id,
-          name: existing.full_name,
-          full_name: existing.full_name,
-          phone: existing.phone,
-          email: existing.email && !existing.email.includes('@vktori.internal') ? existing.email : '',
-          party_role: existing.party_role,
-          party_type: existing.party_type,
-          government_id: existing.government_id
-        }
+        matchedField: 'Phone Number',
+        message: `Existing contact found with phone number ${phone.trim()}`,
+        contact: enrichContactData(match, await getLinkedMattersCount(match.id))
       };
     }
   }
 
-  // 2. Email check
-  if (cleanEmail && !cleanEmail.includes('@vktori.internal')) {
-    const existing = await prisma.client.findFirst({
-      where: { email: { equals: cleanEmail } }
+  if (email && email.trim()) {
+    const match = await prisma.client.findFirst({
+      where: { email: email.trim() }
     });
-    if (existing) {
+    if (match) {
       return {
         duplicate: true,
-        matchedField: 'email',
-        message: 'A contact with this email address already exists.',
-        contact: {
-          id: existing.id,
-          name: existing.full_name,
-          full_name: existing.full_name,
-          phone: existing.phone,
-          email: existing.email,
-          party_role: existing.party_role,
-          party_type: existing.party_type,
-          government_id: existing.government_id
-        }
-      };
-    }
-  }
-
-  // 3. Driver License / Government ID / SSN check
-  if (cleanGovId) {
-    const existing = await prisma.client.findFirst({
-      where: { government_id: { equals: cleanGovId } }
-    });
-    if (existing) {
-      return {
-        duplicate: true,
-        matchedField: 'government_id',
-        message: 'A contact with this Driver License / Government ID / SSN already exists.',
-        contact: {
-          id: existing.id,
-          name: existing.full_name,
-          full_name: existing.full_name,
-          phone: existing.phone,
-          email: existing.email && !existing.email.includes('@vktori.internal') ? existing.email : '',
-          party_role: existing.party_role,
-          party_type: existing.party_type,
-          government_id: existing.government_id
-        }
+        matchedField: 'Email Address',
+        message: `Existing contact found with email ${email.trim()}`,
+        contact: enrichContactData(match, await getLinkedMattersCount(match.id))
       };
     }
   }
@@ -214,7 +199,7 @@ const findDuplicateContact = async (data = {}) => {
 };
 
 const create = async (data, user) => {
-  const { full_name, email, phone, party_type = 'Person', organization_name, address_line_1, city, state, postal_code, notes } = data;
+  const { full_name, email, phone, party_type = 'Person', organization_name, address_line_1, city, state, postal_code, notes, is_referral_source, referral_category, default_fee_terms, government_id, driver_license, alien_registration_number } = data;
 
   if (!full_name || !full_name.trim()) {
     const err = new Error('Contact Name is required');
@@ -226,13 +211,23 @@ const create = async (data, user) => {
   const cleanEmail = email ? email.trim() : '';
   const cleanPhone = phone ? phone.trim() : '';
 
-  // Duplicate Check Rule (Priority: Phone -> Email -> GovID)
+  // Duplicate Check Rule
   if (!data.bypass_duplicate) {
     const duplicateMatch = await findDuplicateContact(data);
     if (duplicateMatch) {
       return duplicateMatch;
     }
   }
+
+  const encryptedGovId = government_id ? encryptSensitiveValue(government_id.trim()) : null;
+
+  const serializedNotes = serializeContactNotes(notes, {
+    is_referral_source,
+    referral_category,
+    default_fee_terms,
+    driver_license: driver_license ? encryptSensitiveValue(driver_license.trim()) : '',
+    alien_registration_number: alien_registration_number ? encryptSensitiveValue(alien_registration_number.trim()) : ''
+  });
 
   // Create new contact master entry
   const newContact = await prisma.client.create({
@@ -246,7 +241,8 @@ const create = async (data, user) => {
       city: city || null,
       state: state || null,
       postal_code: postal_code || null,
-      notes: notes || null
+      government_id: encryptedGovId,
+      notes: serializedNotes
     }
   });
 
@@ -261,11 +257,7 @@ const create = async (data, user) => {
     }
   });
 
-  return {
-    ...newContact,
-    linked_matters_count: 0,
-    is_duplicate: false
-  };
+  return enrichContactData(newContact, 0);
 };
 
 const update = async (id, data, user) => {
@@ -277,7 +269,9 @@ const update = async (id, data, user) => {
     throw err;
   }
 
-  const { full_name, email, phone, party_type, organization_name, address_line_1, city, state, postal_code, notes } = data;
+  const { full_name, email, phone, party_type, organization_name, address_line_1, city, state, postal_code, notes, is_referral_source, referral_category, default_fee_terms, government_id, driver_license, alien_registration_number } = data;
+
+  const existingMeta = parseContactNotes(existing.notes);
 
   const updateData = {};
   if (full_name !== undefined) updateData.full_name = full_name.trim();
@@ -289,7 +283,22 @@ const update = async (id, data, user) => {
   if (city !== undefined) updateData.city = city;
   if (state !== undefined) updateData.state = state;
   if (postal_code !== undefined) updateData.postal_code = postal_code;
-  if (notes !== undefined) updateData.notes = notes;
+  if (government_id !== undefined) updateData.government_id = government_id ? encryptSensitiveValue(government_id.trim()) : null;
+
+  const targetNotes = notes !== undefined ? notes : existingMeta.notes;
+  const targetIsRef = is_referral_source !== undefined ? is_referral_source : existingMeta.is_referral_source;
+  const targetCategory = referral_category !== undefined ? referral_category : existingMeta.referral_category;
+  const targetFeeTerms = default_fee_terms !== undefined ? default_fee_terms : existingMeta.default_fee_terms;
+  const targetDL = driver_license !== undefined ? (driver_license ? encryptSensitiveValue(driver_license.trim()) : '') : existingMeta.driver_license;
+  const targetANum = alien_registration_number !== undefined ? (alien_registration_number ? encryptSensitiveValue(alien_registration_number.trim()) : '') : existingMeta.alien_registration_number;
+
+  updateData.notes = serializeContactNotes(targetNotes, {
+    is_referral_source: targetIsRef,
+    referral_category: targetCategory,
+    default_fee_terms: targetFeeTerms,
+    driver_license: targetDL,
+    alien_registration_number: targetANum
+  });
 
   const updated = await prisma.client.update({
     where: { id: contactId },
@@ -308,10 +317,7 @@ const update = async (id, data, user) => {
   });
 
   const linkedCount = await getLinkedMattersCount(updated.id);
-  return {
-    ...updated,
-    linked_matters_count: linkedCount
-  };
+  return enrichContactData(updated, linkedCount);
 };
 
 const remove = async (id, user) => {
@@ -360,6 +366,36 @@ const decryptSensitiveValue = (text) => {
   }
 };
 
+const revealSensitiveField = async (id, fieldName = 'government_id', user) => {
+  const contactId = parseInt(id, 10);
+  const contact = await prisma.client.findUnique({ where: { id: contactId } });
+  if (!contact) {
+    const err = new Error('Contact not found');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const rawVal = contact[fieldName] || contact.government_id || '';
+  const decrypted = decryptSensitiveValue(rawVal) || rawVal;
+
+  // Audit trail log for sensitive field reveal (Point 24)
+  await prisma.activity.create({
+    data: {
+      entity_type: 'contact',
+      entity_id: contact.id,
+      action: 'viewed_sensitive_field',
+      description: `Sensitive field [${fieldName || 'Government ID / SSN'}] click-to-revealed for contact "${contact.full_name}" (ID #${contact.id}) by user ${user?.email || user?.id}`,
+      actor_user_id: user?.id || null
+    }
+  });
+
+  return {
+    field: fieldName,
+    value: decrypted,
+    unmasked: true
+  };
+};
+
 const maskSensitiveValue = (val) => {
   if (!val) return '';
   const str = String(val);
@@ -378,5 +414,6 @@ module.exports = {
   findDuplicateContact,
   encryptSensitiveValue,
   decryptSensitiveValue,
-  maskSensitiveValue
+  maskSensitiveValue,
+  revealSensitiveField
 };

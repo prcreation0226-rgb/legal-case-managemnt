@@ -405,18 +405,18 @@ const create = async (data, user) => {
     data.created_by_user_id = user.id;
   }
 
-  const { 
-    custom_fields, clientIds, clientId, client_id, inlineParties, parties_data, vehicles_data, intake_answers, 
+  const {
+    custom_fields, clientIds, clientId, client_id, inlineParties, parties_data, vehicles_data, intake_answers,
     retaining_client_name, retaining_client_email, retaining_client_phone, retaining_client_address, retaining_client_dob, retaining_client_gov_id,
     fee_type, hourly_rate, contingency_rate, retainer_amount, lead_source, referral_source, existing_client_select, selected_client_id,
-    ...payload 
+    ...payload
   } = data;
 
   if (parties_data) {
     const rawParties = typeof parties_data === 'string' ? JSON.parse(parties_data) : parties_data;
     // Sanitize: Do not store virtual/duplicate Retaining Client inside parties_data
-    payload.parties_data = Array.isArray(rawParties) 
-      ? rawParties.filter(p => !p.is_retaining_client && p.party_role !== 'Retaining Client') 
+    payload.parties_data = Array.isArray(rawParties)
+      ? rawParties.filter(p => !p.is_retaining_client && p.party_role !== 'Retaining Client')
       : rawParties;
     if (Array.isArray(payload.parties_data)) {
       const opp = payload.parties_data.find(p => p.party_role === 'Opposing Party');
@@ -604,22 +604,40 @@ const create = async (data, user) => {
   if (!payload.matter_number) {
     payload.matter_number = await nextMatterNumber(payload.practice_area);
   }
-  
+
   if (payload.initial_filing_date) payload.initial_filing_date = new Date(payload.initial_filing_date);
   if (payload.date_of_loss) payload.date_of_loss = new Date(payload.date_of_loss);
   if (payload.trial_date) payload.trial_date = new Date(payload.trial_date);
   if (payload.next_hearing) payload.next_hearing = new Date(payload.next_hearing);
 
+  if (payload.date_of_loss) {
+    if (payload.sol_term === '1_year') {
+      const d = new Date(payload.date_of_loss);
+      d.setFullYear(d.getFullYear() + 1);
+      payload.sol_date = d;
+    } else if (payload.sol_term === '2_years') {
+      const d = new Date(payload.date_of_loss);
+      d.setFullYear(d.getFullYear() + 2);
+      payload.sol_date = d;
+    } else if (payload.sol_term === 'custom' && payload.sol_date) {
+      payload.sol_date = new Date(payload.sol_date);
+    } else {
+      payload.sol_date = null;
+    }
+  } else {
+    payload.sol_date = null;
+  }
+
   const matter = await prisma.matter.create({ data: payload });
-  
+
   // Sync to calendar
   try {
     const calendarService = require('../calendar/calendar.service');
     await calendarService.syncMatterDates(matter, data.created_by_user_id);
-  } catch(e) {
+  } catch (e) {
     console.error('Failed to sync matter dates to calendar', e);
   }
-  
+
   // Log activity
   await prisma.activity.create({
     data: {
@@ -674,11 +692,11 @@ const update = async (id, data, user) => {
     delete data.created_by_user_id;
   }
 
-  const { 
-    updated_by_user_id, custom_fields, parties_data, vehicles_data, intake_answers, 
+  const {
+    updated_by_user_id, custom_fields, parties_data, vehicles_data, intake_answers,
     retaining_client_name, retaining_client_email, retaining_client_phone, retaining_client_address, retaining_client_dob, retaining_client_gov_id,
     fee_type, hourly_rate, contingency_rate, retainer_amount, lead_source, existing_client_select, selected_client_id,
-    ...prismaData 
+    ...prismaData
   } = data;
   if (parties_data !== undefined) {
     const rawParties = typeof parties_data === 'string' ? JSON.parse(parties_data) : parties_data;
@@ -686,19 +704,19 @@ const update = async (id, data, user) => {
     if (existing.parties_data) {
       existingParties = typeof existing.parties_data === 'string' ? JSON.parse(existing.parties_data) : existing.parties_data;
     }
-    
+
     prismaData.parties_data = Array.isArray(rawParties)
       ? rawParties
-          .filter(p => !p.is_retaining_client && p.party_role !== 'Retaining Client')
-          .map(p => {
-            if (p.government_id && typeof p.government_id === 'string' && p.government_id.includes('••••')) {
-              const orig = existingParties.find(ep => ep.full_name === p.full_name || ep.id === p.id);
-              if (orig && orig.government_id) {
-                return { ...p, government_id: orig.government_id };
-              }
+        .filter(p => !p.is_retaining_client && p.party_role !== 'Retaining Client')
+        .map(p => {
+          if (p.government_id && typeof p.government_id === 'string' && p.government_id.includes('••••')) {
+            const orig = existingParties.find(ep => ep.full_name === p.full_name || ep.id === p.id);
+            if (orig && orig.government_id) {
+              return { ...p, government_id: orig.government_id };
             }
-            return p;
-          })
+          }
+          return p;
+        })
       : rawParties;
     if (Array.isArray(prismaData.parties_data)) {
       const opp = prismaData.parties_data.find(p => p.party_role === 'Opposing Party');
@@ -726,25 +744,28 @@ const update = async (id, data, user) => {
     prismaData.trial_date = new Date(prismaData.trial_date);
   }
 
-  if (prismaData.stage || (prismaData.status && !['pending', 'active', 'completed'].includes(String(prismaData.status).toLowerCase()))) {
-    const rawStage = String(prismaData.stage || prismaData.status);
-    const lower = rawStage.toLowerCase();
+  const finalDateOfLoss = prismaData.date_of_loss !== undefined ? prismaData.date_of_loss : existing.date_of_loss;
+  const finalSolTerm = prismaData.sol_term !== undefined ? prismaData.sol_term : existing.sol_term;
 
-    let answers = prismaData.intake_answers || (existing.intake_answers ? (typeof existing.intake_answers === 'string' ? JSON.parse(existing.intake_answers) : existing.intake_answers) : {});
-    if (typeof answers !== 'object' || answers === null) answers = {};
-    answers.current_stage = rawStage;
-    prismaData.intake_answers = answers;
-
-    delete prismaData.stage;
-    if (['resolution', 'completed', 'decision', 'closed'].includes(lower)) {
-      prismaData.status = 'completed';
-    } else if (['intake', 'pending'].includes(lower)) {
-      prismaData.status = 'pending';
+  if (finalDateOfLoss) {
+    if (finalSolTerm === '1_year') {
+      const d = new Date(finalDateOfLoss);
+      d.setFullYear(d.getFullYear() + 1);
+      prismaData.sol_date = d;
+    } else if (finalSolTerm === '2_years') {
+      const d = new Date(finalDateOfLoss);
+      d.setFullYear(d.getFullYear() + 2);
+      prismaData.sol_date = d;
+    } else if (finalSolTerm === 'custom') {
+      if (prismaData.sol_date !== undefined) {
+        prismaData.sol_date = prismaData.sol_date ? new Date(prismaData.sol_date) : null;
+      }
     } else {
-      prismaData.status = 'active';
+      prismaData.sol_date = null;
     }
+  } else {
+    prismaData.sol_date = null;
   }
-
   const matter = await prisma.matter.update({
     where: { id: idInt },
     data: prismaData,
@@ -754,7 +775,7 @@ const update = async (id, data, user) => {
   try {
     const calendarService = require('../calendar/calendar.service');
     await calendarService.syncMatterDates(matter, updated_by_user_id ?? existing.created_by_user_id);
-  } catch(e) {
+  } catch (e) {
     console.error('Failed to sync matter dates to calendar on update', e);
   }
 
@@ -1027,7 +1048,7 @@ const importMatterParties = async (id, importedParties, user) => {
 
     const isDuplicate = existing.some(
       ep => (ep.email && p.email && ep.email.trim().toLowerCase() === p.email.trim().toLowerCase()) ||
-            (ep.full_name?.trim().toLowerCase() === name.toLowerCase())
+        (ep.full_name?.trim().toLowerCase() === name.toLowerCase())
     );
 
     if (isDuplicate) {
@@ -1244,14 +1265,16 @@ async function addMatterVehicle(id, vehicleData, user) {
   await update(id, { vehicles_data: updatedVehicles }, user);
 
   // Activity log
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'vehicle',
-    entity_id: parseInt(id, 10),
-    action: 'vehicle_added',
-    description: `Vehicle added: ${newVehicle.year} ${newVehicle.make} ${newVehicle.model}${newVehicle.vin ? ` (VIN: ${newVehicle.vin})` : ''}`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'vehicle',
+      entity_id: parseInt(id, 10),
+      action: 'vehicle_added',
+      description: `Vehicle added: ${newVehicle.year} ${newVehicle.make} ${newVehicle.model}${newVehicle.vin ? ` (VIN: ${newVehicle.vin})` : ''}`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return newVehicle;
 }
@@ -1272,14 +1295,16 @@ async function updateMatterVehicle(id, vehicleId, vehicleData, user) {
   existing[idx] = updated;
   await update(id, { vehicles_data: existing }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'vehicle',
-    entity_id: parseInt(id, 10),
-    action: 'vehicle_updated',
-    description: `Vehicle updated: ${updated.year} ${updated.make} ${updated.model}`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'vehicle',
+      entity_id: parseInt(id, 10),
+      action: 'vehicle_updated',
+      description: `Vehicle updated: ${updated.year} ${updated.make} ${updated.model}`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return updated;
 }
@@ -1293,14 +1318,16 @@ async function deleteMatterVehicle(id, vehicleId, user) {
   const remaining = existing.filter(v => (v.vehicle_id || v.id) !== vehicleId);
   await update(id, { vehicles_data: remaining }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'vehicle',
-    entity_id: parseInt(id, 10),
-    action: 'vehicle_deleted',
-    description: `Vehicle deleted: ${vehicle.year} ${vehicle.make} ${vehicle.model}`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'vehicle',
+      entity_id: parseInt(id, 10),
+      action: 'vehicle_deleted',
+      description: `Vehicle deleted: ${vehicle.year} ${vehicle.make} ${vehicle.model}`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return { success: true, deleted_vehicle_id: vehicleId };
 }
@@ -1312,14 +1339,16 @@ async function bulkDeleteVehicles(id, vehicleIds, user) {
   const remaining = existing.filter(v => !vehicleIds.includes(v.vehicle_id || v.id));
   await update(id, { vehicles_data: remaining }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'vehicle',
-    entity_id: parseInt(id, 10),
-    action: 'vehicles_bulk_deleted',
-    description: `Bulk deleted ${vehicleIds.length} vehicles`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'vehicle',
+      entity_id: parseInt(id, 10),
+      action: 'vehicles_bulk_deleted',
+      description: `Bulk deleted ${vehicleIds.length} vehicles`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return { success: true, deleted_count: existing.length - remaining.length };
 }
@@ -1558,14 +1587,16 @@ async function updateDriverProfile(id, partyId, profileData, user) {
 
   await update(id, { parties_data: parties, vehicles_data: vehicles }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'driver_profile_updated',
-    description: `Driver profile updated for ${party.full_name} (License: ${updatedProfile.license_number})`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'driver_profile_updated',
+      description: `Driver profile updated for ${party.full_name} (License: ${updatedProfile.license_number})`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return {
     party_id: party.id,
@@ -1623,14 +1654,16 @@ async function bulkUpdateDrivers(id, payload, user) {
 
   await update(id, { parties_data: parties, vehicles_data: vehicles }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'drivers_bulk_updated',
-    description: `Bulk operation "${action}" completed for ${updatedCount} drivers`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'drivers_bulk_updated',
+      description: `Bulk operation "${action}" completed for ${updatedCount} drivers`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return { success: true, action, updated_count: updatedCount };
 }
@@ -1659,14 +1692,16 @@ async function exportMatterDrivers(id, format = 'csv', user) {
     `"${(d.notes || '').replace(/"/g, '""')}"`
   ]);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'driver_exported',
-    description: `Exported ${drivers.length} drivers in ${format.toUpperCase()} format`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'driver_exported',
+      description: `Exported ${drivers.length} drivers in ${format.toUpperCase()} format`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
 }
@@ -1751,14 +1786,16 @@ async function importMatterDrivers(id, driverRecords, user) {
 
   await update(id, { parties_data: parties }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'driver_imported',
-    description: `Imported drivers: ${addedCount} added, ${updatedCount} updated, ${skippedCount} skipped`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'driver_imported',
+      description: `Imported drivers: ${addedCount} added, ${updatedCount} updated, ${skippedCount} skipped`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return {
     success: true,
@@ -1812,7 +1849,7 @@ async function getMatterTimeline(id, query = {}, user) {
   rawActivities.forEach(act => {
     let parsedData = {};
     if (act.description && act.description.startsWith('{')) {
-      try { parsedData = JSON.parse(act.description); } catch (e) {}
+      try { parsedData = JSON.parse(act.description); } catch (e) { }
     }
     const meta = getModuleMeta(act.action, act.entity_type, act.description);
     const title = parsedData.title || act.action?.replace(/_/g, ' ') || 'Case Event';
@@ -2008,7 +2045,7 @@ async function updateMatterTimelineEvent(id, eventId, payload, user) {
 
   let descObj = {};
   if (existing.description && existing.description.startsWith('{')) {
-    try { descObj = JSON.parse(existing.description); } catch (e) {}
+    try { descObj = JSON.parse(existing.description); } catch (e) { }
   } else {
     descObj = { description: existing.description || '' };
   }
@@ -2268,14 +2305,16 @@ async function updatePassengerProfile(id, partyId, profileData, user) {
 
   await update(id, { parties_data: parties, vehicles_data: vehicles }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'passenger_profile_updated',
-    description: `Passenger profile updated for ${party.full_name} (Seat: ${updatedProfile.seat_position})`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'passenger_profile_updated',
+      description: `Passenger profile updated for ${party.full_name} (Seat: ${updatedProfile.seat_position})`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return {
     party_id: party.id,
@@ -2341,14 +2380,16 @@ async function bulkUpdatePassengers(id, payload, user) {
 
   await update(id, { parties_data: parties, vehicles_data: vehicles }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'passengers_bulk_updated',
-    description: `Bulk operation "${action}" completed for ${updatedCount} passengers`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'passengers_bulk_updated',
+      description: `Bulk operation "${action}" completed for ${updatedCount} passengers`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return { success: true, action, updated_count: updatedCount };
 }
@@ -2376,14 +2417,16 @@ async function exportMatterPassengers(id, format = 'csv', user) {
     `"${p.assigned_vehicle_id || ''}"`, `"${p.assigned_driver_party_id || ''}"`, `"${(p.passenger_notes || '').replace(/"/g, '""')}"`
   ]);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'passenger_exported',
-    description: `Exported ${passengers.length} passengers in ${format.toUpperCase()} format`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'passenger_exported',
+      description: `Exported ${passengers.length} passengers in ${format.toUpperCase()} format`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
 }
@@ -2462,14 +2505,16 @@ async function importMatterPassengers(id, passengerRecords, user) {
 
   await update(id, { parties_data: parties }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'passenger_imported',
-    description: `Imported passengers: ${addedCount} added, ${updatedCount} updated, ${skippedCount} skipped`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'passenger_imported',
+      description: `Imported passengers: ${addedCount} added, ${updatedCount} updated, ${skippedCount} skipped`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return {
     success: true,
@@ -2596,14 +2641,16 @@ async function updateWitnessProfile(id, partyId, profileData, user) {
 
   await update(id, { parties_data: parties }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'witness_profile_updated',
-    description: `Witness profile updated for ${party.full_name} (${updatedProfile.statement_status})`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'witness_profile_updated',
+      description: `Witness profile updated for ${party.full_name} (${updatedProfile.statement_status})`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return {
     party_id: party.id,
@@ -2650,14 +2697,16 @@ async function bulkUpdateWitnesses(id, payload, user) {
 
   await update(id, { parties_data: parties }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'witnesses_bulk_updated',
-    description: `Bulk operation "${action}" completed for ${updatedCount} witnesses`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'witnesses_bulk_updated',
+      description: `Bulk operation "${action}" completed for ${updatedCount} witnesses`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return { success: true, action, updated_count: updatedCount };
 }
@@ -2682,14 +2731,16 @@ async function exportMatterWitnesses(id, format = 'csv', user) {
     `"${p.reliability || ''}"`, `"${(p.relationship_to_parties || '').replace(/"/g, '""')}"`, `"${(p.witness_notes || '').replace(/"/g, '""')}"`
   ]);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'witness_exported',
-    description: `Exported ${witnesses.length} witnesses in ${format.toUpperCase()} format`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'witness_exported',
+      description: `Exported ${witnesses.length} witnesses in ${format.toUpperCase()} format`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
 }
@@ -2758,14 +2809,16 @@ async function importMatterWitnesses(id, witnessRecords, user) {
 
   await update(id, { parties_data: parties }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'witness_imported',
-    description: `Imported witnesses: ${addedCount} added, ${updatedCount} updated, ${skippedCount} skipped`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'witness_imported',
+      description: `Imported witnesses: ${addedCount} added, ${updatedCount} updated, ${skippedCount} skipped`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return {
     success: true,
@@ -2942,14 +2995,16 @@ async function updateInsuranceProfile(id, partyId, profileData, user) {
 
   await update(id, { parties_data: parties }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'insurance_profile_updated',
-    description: `Insurance profile updated for ${updatedProfile.company_name || party.full_name} (${updatedProfile.claim_status})`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'insurance_profile_updated',
+      description: `Insurance profile updated for ${updatedProfile.company_name || party.full_name} (${updatedProfile.claim_status})`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return {
     party_id: party.id,
@@ -2994,14 +3049,16 @@ async function bulkUpdateInsurance(id, payload, user) {
 
   await update(id, { parties_data: parties }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'insurance_bulk_updated',
-    description: `Bulk operation "${action}" completed for ${updatedCount} insurance records`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'insurance_bulk_updated',
+      description: `Bulk operation "${action}" completed for ${updatedCount} insurance records`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return { success: true, action, updated_count: updatedCount };
 }
@@ -3028,14 +3085,16 @@ async function exportMatterInsurance(id, format = 'csv', user) {
     `"${p.coverage_limit || ''}"`, `"${p.deductible || ''}"`, `"${p.settlement_offer || ''}"`, `"${p.payment_received || ''}"`, `"${(p.notes || '').replace(/"/g, '""')}"`
   ]);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'insurance_exported',
-    description: `Exported ${records.length} insurance records in ${format.toUpperCase()} format`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'insurance_exported',
+      description: `Exported ${records.length} insurance records in ${format.toUpperCase()} format`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
 }
@@ -3116,14 +3175,16 @@ async function importMatterInsurance(id, insuranceRecords, user) {
 
   await update(id, { parties_data: parties }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'insurance_imported',
-    description: `Imported insurance records: ${addedCount} added, ${updatedCount} updated, ${skippedCount} skipped`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'insurance_imported',
+      description: `Imported insurance records: ${addedCount} added, ${updatedCount} updated, ${skippedCount} skipped`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return {
     success: true,
@@ -3310,14 +3371,16 @@ async function updateMedicalProviderProfile(id, partyId, profileData, user) {
 
   await update(id, { parties_data: parties }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'medical_provider_updated',
-    description: `Medical Provider updated for ${updatedProfile.provider_name} (${updatedProfile.treatment_status})`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'medical_provider_updated',
+      description: `Medical Provider updated for ${updatedProfile.provider_name} (${updatedProfile.treatment_status})`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return {
     party_id: party.id,
@@ -3362,14 +3425,16 @@ async function bulkUpdateMedicalProviders(id, payload, user) {
 
   await update(id, { parties_data: parties }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'medical_providers_bulk_updated',
-    description: `Bulk operation "${action}" completed for ${updatedCount} medical providers`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'medical_providers_bulk_updated',
+      description: `Bulk operation "${action}" completed for ${updatedCount} medical providers`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return { success: true, action, updated_count: updatedCount };
 }
@@ -3393,14 +3458,16 @@ async function exportMatterMedicalProviders(id, format = 'csv', user) {
     `"${p.estimated_medical_cost || ''}"`, `"${p.paid_amount || ''}"`, `"${p.balance_amount || ''}"`, `"${p.insurance_claim_number || ''}"`, `"${(p.notes || '').replace(/"/g, '""')}"`
   ]);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'medical_providers_exported',
-    description: `Exported ${records.length} medical providers in ${format.toUpperCase()} format`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'medical_providers_exported',
+      description: `Exported ${records.length} medical providers in ${format.toUpperCase()} format`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
 }
@@ -3494,14 +3561,16 @@ async function importMatterMedicalProviders(id, records, user) {
 
   await update(id, { parties_data: parties }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'medical_providers_imported',
-    description: `Imported medical providers: ${addedCount} added, ${updatedCount} updated, ${skippedCount} skipped`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'medical_providers_imported',
+      description: `Imported medical providers: ${addedCount} added, ${updatedCount} updated, ${skippedCount} skipped`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return {
     success: true,
@@ -3674,14 +3743,16 @@ async function updateEmployerProfile(id, partyId, profileData, user) {
 
   await update(id, { parties_data: parties }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'employer_updated',
-    description: `Employer profile updated for ${updatedProfile.employer_name} (${updatedProfile.employment_status})`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'employer_updated',
+      description: `Employer profile updated for ${updatedProfile.employer_name} (${updatedProfile.employment_status})`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return {
     party_id: party.id,
@@ -3726,14 +3797,16 @@ async function bulkUpdateEmployers(id, payload, user) {
 
   await update(id, { parties_data: parties }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'employers_bulk_updated',
-    description: `Bulk operation "${action}" completed for ${updatedCount} employers`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'employers_bulk_updated',
+      description: `Bulk operation "${action}" completed for ${updatedCount} employers`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return { success: true, action, updated_count: updatedCount };
 }
@@ -3757,14 +3830,16 @@ async function exportMatterEmployers(id, format = 'csv', user) {
     `"${p.return_to_work_date || ''}"`, `"${p.lost_wages || ''}"`, `"${(p.employer_notes || '').replace(/"/g, '""')}"`
   ]);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'employers_exported',
-    description: `Exported ${records.length} employers in ${format.toUpperCase()} format`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'employers_exported',
+      description: `Exported ${records.length} employers in ${format.toUpperCase()} format`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
 }
@@ -3843,14 +3918,16 @@ async function importMatterEmployers(id, records, user) {
 
   await update(id, { parties_data: parties }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'employers_imported',
-    description: `Imported employers: ${addedCount} added, ${updatedCount} updated, ${skippedCount} skipped`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'employers_imported',
+      description: `Imported employers: ${addedCount} added, ${updatedCount} updated, ${skippedCount} skipped`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return {
     success: true,
@@ -4018,14 +4095,16 @@ async function updatePropertyDamageProfile(id, partyId, profileData, user) {
 
   await update(id, { parties_data: parties }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'property_damage_updated',
-    description: `Property damage updated for ${updatedProfile.owner_name} (${updatedProfile.damage_severity})`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'property_damage_updated',
+      description: `Property damage updated for ${updatedProfile.owner_name} (${updatedProfile.damage_severity})`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return {
     party_id: party.id,
@@ -4070,14 +4149,16 @@ async function bulkUpdatePropertyDamage(id, payload, user) {
 
   await update(id, { parties_data: parties }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'property_damage_bulk_updated',
-    description: `Bulk operation "${action}" completed for ${updatedCount} property damage records`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'property_damage_bulk_updated',
+      description: `Bulk operation "${action}" completed for ${updatedCount} property damage records`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return { success: true, action, updated_count: updatedCount };
 }
@@ -4103,14 +4184,16 @@ async function exportMatterPropertyDamage(id, format = 'csv', user) {
     `"${p.estimated_repair_cost || ''}"`, `"${p.actual_repair_cost || ''}"`, `"${p.insurance_claim_number || ''}"`, `"${(p.notes || '').replace(/"/g, '""')}"`
   ]);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'property_damage_exported',
-    description: `Exported ${records.length} property damage records in ${format.toUpperCase()} format`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'property_damage_exported',
+      description: `Exported ${records.length} property damage records in ${format.toUpperCase()} format`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
 }
@@ -4190,14 +4273,16 @@ async function importMatterPropertyDamage(id, records, user) {
 
   await update(id, { parties_data: parties }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'property_damage_imported',
-    description: `Imported property damage records: ${addedCount} added, ${updatedCount} updated, ${skippedCount} skipped`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'property_damage_imported',
+      description: `Imported property damage records: ${addedCount} added, ${updatedCount} updated, ${skippedCount} skipped`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return {
     success: true,
@@ -4381,14 +4466,16 @@ async function updatePoliceProfile(id, partyId, profileData, user) {
 
   await update(id, { parties_data: parties }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'police_profile_updated',
-    description: `Police record updated for ${updatedProfile.officer_name} (${updatedProfile.reporting_agency}, Report #${updatedProfile.report_number})`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'police_profile_updated',
+      description: `Police record updated for ${updatedProfile.officer_name} (${updatedProfile.reporting_agency}, Report #${updatedProfile.report_number})`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return {
     party_id: party.id,
@@ -4433,14 +4520,16 @@ async function bulkUpdatePolice(id, payload, user) {
 
   await update(id, { parties_data: parties }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'police_bulk_updated',
-    description: `Bulk operation "${action}" completed for ${updatedCount} police records`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'police_bulk_updated',
+      description: `Bulk operation "${action}" completed for ${updatedCount} police records`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return { success: true, action, updated_count: updatedCount };
 }
@@ -4467,14 +4556,16 @@ async function exportMatterPolice(id, format = 'csv', user) {
     `"${p.citation_issued || ''}"`, `"${p.citation_number || ''}"`, `"${(p.police_notes || '').replace(/"/g, '""')}"`
   ]);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'police_exported',
-    description: `Exported ${records.length} police records in ${format.toUpperCase()} format`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'police_exported',
+      description: `Exported ${records.length} police records in ${format.toUpperCase()} format`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
 }
@@ -4559,14 +4650,16 @@ async function importMatterPolice(id, records, user) {
 
   await update(id, { parties_data: parties }, user);
 
-  await prisma.activity.create({ data: {
-    matter_id: parseInt(id, 10),
-    entity_type: 'party',
-    entity_id: parseInt(id, 10),
-    action: 'police_imported',
-    description: `Imported police records: ${addedCount} added, ${updatedCount} updated, ${skippedCount} skipped`,
-    actor_user_id: user?.id || null,
-  }});
+  await prisma.activity.create({
+    data: {
+      matter_id: parseInt(id, 10),
+      entity_type: 'party',
+      entity_id: parseInt(id, 10),
+      action: 'police_imported',
+      description: `Imported police records: ${addedCount} added, ${updatedCount} updated, ${skippedCount} skipped`,
+      actor_user_id: user?.id || null,
+    }
+  });
 
   return {
     success: true,

@@ -218,6 +218,8 @@ model Matter {
   closed_at            DateTime?
   initial_filing_date  DateTime?
   date_of_loss         DateTime?
+  sol_term             String?
+  sol_date             DateTime?
   trial_date           DateTime?
   case_number          String?
   judge_name           String?

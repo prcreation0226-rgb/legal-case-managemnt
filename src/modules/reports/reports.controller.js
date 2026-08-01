@@ -21,7 +21,11 @@ exports.listReports = async (req, res, next) => {
 
 exports.getReport = async (req, res, next) => {
   try {
-    const report = await reportsService.getById(Number(req.params.id));
+    const reportId = Number(req.params.id);
+    if (!reportId || Number.isNaN(reportId)) {
+      return res.status(400).json({ message: 'Invalid Report ID' });
+    }
+    const report = await reportsService.getById(reportId);
     if (!report) {
       return res.status(404).json({ message: 'Report not found' });
     }
@@ -46,6 +50,15 @@ exports.downloadReport = async (req, res, next) => {
 exports.getMarketing = async (req, res, next) => {
   try {
     const data = await reportsService.getMarketingStats();
+    res.status(200).json({ data });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getReferralAnalytics = async (req, res, next) => {
+  try {
+    const data = await reportsService.getReferralAnalytics();
     res.status(200).json({ data });
   } catch (error) {
     next(error);

@@ -187,7 +187,34 @@ const remove = async (id, user) => {
     }
   }).catch(() => {});
 
-  return await prisma.client.delete({ where: { id: clientId } });
+  return await prisma.$transaction(async (tx) => {
+    const matterIds = (client.matters || []).map(m => m.id);
+    if (matterIds.length > 0) {
+      await tx.invoice.deleteMany({ where: { matter_id: { in: matterIds } } });
+      await tx.timeEntry.deleteMany({ where: { matter_id: { in: matterIds } } });
+      await tx.expense.deleteMany({ where: { matter_id: { in: matterIds } } });
+      await tx.communication.deleteMany({ where: { matter_id: { in: matterIds } } });
+      await tx.document.deleteMany({ where: { matter_id: { in: matterIds } } });
+      await tx.matter.deleteMany({ where: { id: { in: matterIds } } });
+    }
+
+    await tx.lead.updateMany({
+      where: { converted_client_id: clientId },
+      data: { converted_client_id: null }
+    }).catch(() => {});
+
+    if (client.user_id) {
+      await tx.document.deleteMany({ where: { uploaded_by_user_id: client.user_id } }).catch(() => {});
+    }
+
+    const deletedClient = await tx.client.delete({ where: { id: clientId } });
+
+    if (client.user_id) {
+      await tx.user.delete({ where: { id: client.user_id } }).catch(() => {});
+    }
+
+    return deletedClient;
+  });
 };
 
 const mergeContacts = async (primaryId, duplicateId, user) => {

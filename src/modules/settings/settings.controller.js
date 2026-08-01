@@ -76,3 +76,21 @@ exports.removeLetterhead = async (req, res, next) => {
     next(err);
   }
 };
+
+exports.exportFirmData = async (req, res, next) => {
+  try {
+    const data = await settingsService.exportFirmData(req.user);
+    res.json(sendResponse(true, 'Firm data exported successfully (No Lock-In)', data));
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.runEmergencyBackup = async (req, res, next) => {
+  try {
+    const data = await settingsService.runEmergencyBackup(req.user);
+    res.json(sendResponse(true, 'Encrypted backup generated successfully', data));
+  } catch (err) {
+    next(err);
+  }
+};

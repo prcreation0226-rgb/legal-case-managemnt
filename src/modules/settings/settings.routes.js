@@ -29,4 +29,7 @@ router.delete('/company-profile/logo', protect, authorize('admin'), settingsCont
 router.post('/company-profile/letterhead', protect, authorize('admin'), upload.single('letterhead'), settingsController.uploadLetterhead);
 router.delete('/company-profile/letterhead', protect, authorize('admin'), settingsController.removeLetterhead);
 
+router.get('/export-firm-data', protect, authorize('admin'), settingsController.exportFirmData);
+router.post('/run-backup', protect, authorize('admin'), settingsController.runEmergencyBackup);
+
 module.exports = router;

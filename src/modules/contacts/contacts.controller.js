@@ -62,11 +62,19 @@ const remove = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const revealSensitive = async (req, res, next) => {
+  try {
+    const data = await service.revealSensitiveField(req.params.id, req.body?.field || 'government_id', req.user);
+    res.status(200).json(sendResponse(true, 'Sensitive field revealed & audit logged', data));
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getAll,
   search,
   getById,
   create,
   update,
-  remove
+  remove,
+  revealSensitive
 };

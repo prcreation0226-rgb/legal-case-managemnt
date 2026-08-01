@@ -227,6 +227,7 @@ model Matter {
   judge_name           String?
   court_name           String?
   court_address        String?
+  court_county         String?
   court_department     String?
   hearing_time         String?
   created_by_user_id   Int

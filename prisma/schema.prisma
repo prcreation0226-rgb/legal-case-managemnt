@@ -189,6 +189,8 @@ model Client {
   opposing_party_name   String?
   opposing_law_firm     String?
   opposing_counsel_name String?
+  referral_source       String?
+  referral_detail       String?
   created_at        DateTime @default(now())
   updated_at        DateTime @updatedAt
 

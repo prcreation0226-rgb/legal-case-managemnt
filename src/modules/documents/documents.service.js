@@ -42,8 +42,8 @@ const ensureDocumentAccess = async (doc, user) => {
 
 const getAll = async (query, user) => {
   const { matter_id, visibility, page = 1, limit = 10 } = query;
-  const take = parseInt(limit);
-  const skip = (parseInt(page) - 1) * take;
+  const take = limit === 'all' ? undefined : parseInt(limit);
+  const skip = take ? (parseInt(page) - 1) * take : undefined;
 
   const where = { ...documentScope(user) };
   if (matter_id) where.matter_id = parseInt(matter_id);

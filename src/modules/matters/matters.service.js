@@ -849,6 +849,7 @@ const update = async (id, data, user) => {
         old_status: existing.status,
         new_status: matter.status,
         changed_by_user_id: actorId,
+        portal_visible: true, // Default to true when stage is updated
       },
     });
 
@@ -1868,8 +1869,16 @@ async function getMatterTimeline(id, query = {}, user) {
 
   const { module: moduleFilter = 'All', search = '', sort = 'newest' } = query;
 
+  const where = { matter_id: parseInt(id, 10) };
+  if (user?.role === 'client') {
+    // Clients only see events that are marked client-visible or general updates
+    where.action = {
+      in: ['timeline_manual_entry', 'uploaded', 'converted_from_lead', 'portal_activated', 'portal_login', 'stage_change']
+    };
+  }
+
   const rawActivities = await prisma.activity.findMany({
-    where: { matter_id: parseInt(id, 10) },
+    where,
     include: {
       actor: { select: { id: true, full_name: true, email: true } }
     },
@@ -1988,6 +1997,9 @@ async function getMatterTimeline(id, query = {}, user) {
 
     const docs = Array.isArray(matter.documents) ? matter.documents : [];
     docs.forEach((d, idx) => {
+      // Do not disclose internal documents on the client timeline
+      if (user?.role === 'client' && d.visibility !== 'client_shared' && d.visibility !== 'client_visible') return;
+
       timelineItems.push({
         id: `synth_doc_${d.id || idx}`,
         module: 'Documents',

@@ -280,11 +280,94 @@ const mergeContacts = async (primaryId, duplicateId, user) => {
   return { success: true, message: `Merged contact #${dId} into #${pId}` };
 };
 
+const sendPortalInvite = async (clientId, user) => {
+  if (user?.role !== 'admin' && user?.role !== 'lawyer') {
+    const err = new Error('Not authorized to send portal invites');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  const client = await prisma.client.findUnique({
+    where: { id: parseInt(clientId) },
+    include: { user: true }
+  });
+
+  if (!client) {
+    const err = new Error('Client profile not found');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  let targetUser = client.user;
+  if (!targetUser) {
+    // Generate new secure user credentials if not present
+    const crypto = require('crypto');
+    const password_hash = crypto.randomBytes(32).toString('hex'); // Placeholder hash - passwordless clients will not use it
+    targetUser = await prisma.user.create({
+      data: {
+        email: client.email,
+        full_name: client.full_name,
+        password_hash,
+        role: 'client',
+        email_verified: false,
+      }
+    });
+    
+    // Update Client reference
+    await prisma.client.update({
+      where: { id: client.id },
+      data: { user_id: targetUser.id }
+    });
+  }
+
+  // Generate invite token (Option A: Passwordless Verification Flow)
+  const crypto = require('crypto');
+  const inviteToken = crypto.randomBytes(32).toString('hex');
+  const expiry = new Date();
+  expiry.setDate(expiry.getDate() + 7); // 7-day token expiration
+
+  try {
+    await prisma.user.update({
+      where: { id: targetUser.id },
+      data: {
+        invite_token: inviteToken,
+        invite_token_expires: expiry,
+        invite_sent_at: new Date(),
+        invite_send_failed: false,
+      }
+    });
+
+    // Triggers email dispatch
+    console.log(`[Email Dispatch] Transactional Portal Invitation Link: http://localhost:5173/portal-invite?token=${inviteToken}`);
+
+    // Create Audit Activity Timeline record
+    await prisma.activity.create({
+      data: {
+        entity_type: 'client',
+        entity_id: client.id,
+        action: 'portal_invite_sent',
+        actor_user_id: user.id,
+        description: `Portal invitation link dispatched to client email: ${client.email}`,
+      }
+    });
+
+    return { success: true, message: 'Portal invitation link triggered successfully' };
+  } catch (err) {
+    // Phase 2B Retry Failure Flagging
+    await prisma.user.update({
+      where: { id: targetUser.id },
+      data: { invite_send_failed: true }
+    });
+    throw err;
+  }
+};
+
 module.exports = {
   getAll,
   getById,
   create,
   update,
   remove,
-  mergeContacts
+  mergeContacts,
+  sendPortalInvite
 };

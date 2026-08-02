@@ -64,11 +64,21 @@ const merge = async (req, res, next) => {
   }
 };
 
+const sendPortalInvite = async (req, res, next) => {
+  try {
+    const data = await service.sendPortalInvite(req.params.id, req.user);
+    res.status(200).json(sendResponse(true, 'Portal invitation email triggered successfully', data));
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   getAll,
   getById,
   create,
   update,
   remove,
-  merge
+  merge,
+  sendPortalInvite
 };

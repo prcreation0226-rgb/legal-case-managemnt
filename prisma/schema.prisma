@@ -111,6 +111,15 @@ model User {
   generated_forms       GeneratedForm[]
   email_accounts        EmailAccount[]
 
+  // Verification & Magic link fields
+  email_verified        Boolean  @default(false)
+  invite_token          String?  @unique
+  invite_token_expires  DateTime?
+  magic_link_token      String?  @unique
+  magic_link_expires    DateTime?
+  invite_sent_at        DateTime?
+  invite_send_failed    Boolean  @default(false)
+
   @@map("users")
 }
 
@@ -141,23 +150,29 @@ model Lawyer {
 }
 
 model Lead {
-  id                  Int        @id @default(autoincrement())
+  id                  Int            @id @default(autoincrement())
   full_name           String
   email               String
   phone               String?
   matter_type         String?
   practice_area       String?
   source              String?
-  message             String?    @db.Text
-  status              LeadStatus @default(new)
-  notes               String?    @db.Text
+  message             String?        @db.Text
+  status              LeadStatus     @default(new)
+  notes               String?        @db.Text
   created_by_user_id  Int?
   converted_client_id Int?
-  created_at          DateTime   @default(now())
-  updated_at          DateTime   @updatedAt
+  created_at          DateTime       @default(now())
+  updated_at          DateTime       @updatedAt
 
-  created_by          User?      @relation("CreatedBy", fields: [created_by_user_id], references: [id])
-  client              Client?    @relation(fields: [converted_client_id], references: [id])
+  // Point 3 fields
+  has_court_date       Boolean        @default(false)
+  decline_reason       String?        @db.Text
+  duplicate_of_lead_id Int?
+
+  created_by          User?          @relation("CreatedBy", fields: [created_by_user_id], references: [id])
+  client              Client?        @relation(fields: [converted_client_id], references: [id])
+  lead_documents      LeadDocument[]
 
   @@map("leads")
 }
@@ -193,6 +208,10 @@ model Client {
   referral_detail       String?
   created_at        DateTime @default(now())
   updated_at        DateTime @updatedAt
+
+  // Client preferences
+  preferred_language String?
+  preferred_contact  String?
 
   user              User?    @relation(fields: [user_id], references: [id])
   leads             Lead[]
@@ -241,6 +260,9 @@ model Matter {
   vehicles_data        Json?
   intake_answers       Json?
 
+  // Attorney note
+  client_next_steps    String?      @db.Text
+
   client               Client       @relation(fields: [client_id], references: [id])
   assigned_lawyer      User?        @relation("AssignedLawyer", fields: [assigned_lawyer_id], references: [id])
   created_by           User         @relation("CreatedBy", fields: [created_by_user_id], references: [id])
@@ -277,6 +299,9 @@ model MatterStatusHistory {
   note              String?  @db.Text
   created_at        DateTime @default(now())
 
+  // Visibility toggle
+  portal_visible     Boolean  @default(false)
+
   matter            Matter   @relation(fields: [matter_id], references: [id])
 
   @@map("matter_status_history")
@@ -298,12 +323,34 @@ model Document {
   created_at           DateTime   @default(now())
   updated_at           DateTime   @updatedAt
 
+  // Document metadata
+  doc_type             String?
+  doc_description      String?    @db.Text
+
   matter               Matter     @relation(fields: [matter_id], references: [id])
   uploader             User       @relation(fields: [uploaded_by_user_id], references: [id])
   folder               Folder?    @relation(fields: [folder_id], references: [id])
   folder_id            Int?
 
   @@map("documents")
+}
+
+model LeadDocument {
+  id            Int      @id @default(autoincrement())
+  lead_id       Int
+  lead          Lead     @relation(fields: [lead_id], references: [id])
+  file_name     String
+  original_name String
+  mime_type     String
+  file_path     String   @db.Text
+  file_size     Int
+  doc_type      String?
+  description   String?  @db.Text
+  scan_status   String   @default("pending")
+  quarantined   Boolean  @default(true)
+  created_at    DateTime @default(now())
+
+  @@map("lead_documents")
 }
 
 model Communication {

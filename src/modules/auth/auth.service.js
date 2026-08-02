@@ -122,9 +122,123 @@ const updateSignature = async (userId, signature) => {
   });
 };
 
+const verifyInvite = async (token) => {
+  const user = await prisma.user.findFirst({
+    where: {
+      invite_token: token,
+      invite_token_expires: { gte: new Date() }
+    }
+  });
+
+  if (!user) {
+    const error = new Error('This invitation link is invalid or has expired. Please contact our office.');
+    error.statusCode = 410;
+    throw error;
+  }
+
+  // Activate and verify email
+  const updatedUser = await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      email_verified: true,
+      invite_token: null,
+      invite_token_expires: null,
+      is_active: true,
+    }
+  });
+
+  const tokenJWT = generateToken({ id: updatedUser.id, roles: [updatedUser.role] });
+
+  // Audit activity log
+  await prisma.activity.create({
+    data: {
+      actor_user_id: updatedUser.id,
+      entity_type: 'client',
+      entity_id: updatedUser.id,
+      action: 'portal_activated',
+      description: `Client activated portal account: ${updatedUser.email}`
+    }
+  });
+
+  const { password_hash: _, ...userWithoutPassword } = updatedUser;
+  return { user: userWithoutPassword, token: tokenJWT };
+};
+
+const requestMagicLink = async (email) => {
+  const user = await prisma.user.findUnique({
+    where: { email: email.trim().toLowerCase() }
+  });
+
+  // Security note: Do not throw if user not found to prevent email scanning. Return success always.
+  if (!user || user.role !== 'client' || !user.is_active) {
+    return { success: true, message: 'If the email exists, a login link has been sent.' };
+  }
+
+  const crypto = require('crypto');
+  const loginToken = crypto.randomBytes(32).toString('hex');
+  const expires = new Date(Date.now() + 15 * 60 * 1000); // 15-minute token lifetime
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      magic_link_token: loginToken,
+      magic_link_expires: expires
+    }
+  });
+
+  // Outward dispatch link
+  console.log(`[Email Dispatch] Transactional Portal Login Link: http://localhost:5173/login/verify?token=${loginToken}`);
+
+  return { success: true, message: 'If the email exists, a login link has been sent.' };
+};
+
+const verifyMagicLink = async (token) => {
+  const user = await prisma.user.findFirst({
+    where: {
+      magic_link_token: token,
+      magic_link_expires: { gte: new Date() }
+    }
+  });
+
+  if (!user) {
+    const error = new Error('Your secure login link is invalid or has expired. Please request a new link.');
+    error.statusCode = 401;
+    throw error;
+  }
+
+  // Clear token and update verification status
+  const updatedUser = await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      magic_link_token: null,
+      magic_link_expires: null,
+      email_verified: true, // Auto verify email on magic link click
+    }
+  });
+
+  const tokenJWT = generateToken({ id: updatedUser.id, roles: [updatedUser.role] });
+
+  // Audit activity log - Portal view login event
+  await prisma.activity.create({
+    data: {
+      actor_user_id: updatedUser.id,
+      entity_type: 'client',
+      entity_id: updatedUser.id,
+      action: 'portal_login',
+      description: `Client logged in to portal: ${updatedUser.email}`
+    }
+  });
+
+  const { password_hash: _, ...userWithoutPassword } = updatedUser;
+  return { user: userWithoutPassword, token: tokenJWT };
+};
+
 module.exports = {
   login,
   register,
   changePassword,
   updateSignature,
+  verifyInvite,
+  requestMagicLink,
+  verifyMagicLink
 };

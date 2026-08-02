@@ -62,6 +62,36 @@ const updateSignature = async (req, res, next) => {
   }
 };
 
+const verifyInvite = async (req, res, next) => {
+  try {
+    const { token } = req.body;
+    const data = await authService.verifyInvite(token);
+    res.status(200).json(sendResponse(true, 'Portal invite verified successfully', data));
+  } catch (err) {
+    next(err);
+  }
+};
+
+const requestMagicLink = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    const data = await authService.requestMagicLink(email);
+    res.status(200).json(sendResponse(true, data.message, data));
+  } catch (err) {
+    next(err);
+  }
+};
+
+const verifyMagicLink = async (req, res, next) => {
+  try {
+    const { token } = req.body;
+    const data = await authService.verifyMagicLink(token);
+    res.status(200).json(sendResponse(true, 'Login successful', data));
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   login,
   register,
@@ -69,5 +99,8 @@ module.exports = {
   logout,
   changePassword,
   updateSignature,
+  verifyInvite,
+  requestMagicLink,
+  verifyMagicLink,
 };
 

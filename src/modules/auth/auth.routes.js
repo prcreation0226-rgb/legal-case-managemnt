@@ -7,6 +7,10 @@ const { protect } = require('../../middlewares/auth.middleware');
 
 router.post('/login', validate(authSchema.login), authController.login);
 router.post('/register', validate(authSchema.register), authController.register);
+router.post('/request-magic-link', authController.requestMagicLink);
+router.post('/verify-magic-link', authController.verifyMagicLink);
+router.post('/verify-invite', authController.verifyInvite);
+
 router.get('/me', protect, authController.getMe);
 router.patch('/change-password', protect, authController.changePassword);
 router.put('/signature', protect, authController.updateSignature);

@@ -261,7 +261,7 @@ const ensureInvoiceAccess = async (invoice, user) => {
     const ok = await prisma.matter.count({ where: { id: invoice.matter_id, assigned_lawyer_id: user.id } });
     return ok > 0;
   }
-  if (user.role === 'client') {
+    if (invoice.status === 'draft') return false; // Clients must never see internal draft invoices
     const ok = await prisma.matter.count({
       where: {
         id: invoice.matter_id,
@@ -318,6 +318,7 @@ const getAll = async (query, user) => {
   if (status) where.status = status;
   if (user?.role === 'lawyer') where.matter = { assigned_lawyer_id: user.id };
   if (user?.role === 'client') {
+    where.status = { not: 'draft' };
     where.matter = {
       OR: [
         { client: { user_id: user.id } },

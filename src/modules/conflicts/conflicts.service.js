@@ -70,12 +70,16 @@ const checkConflict = async ({ prospectiveClient, prospective_client_name, oppos
     },
     include: { matter: true }
   });
-  communications.forEach(com => matches.push({ 
-    type: 'communication', 
-    id: com.id, 
-    name: `Message in Matter ${com.matter.matter_number}`, 
-    details: com.message_body.substring(0, 100) + '...'
-  }));
+  communications.forEach(com => {
+    if (com.matter) {
+      matches.push({ 
+        type: 'communication', 
+        id: com.id, 
+        name: `Message in Matter ${com.matter.matter_number}`, 
+        details: com.message_body.substring(0, 100) + '...'
+      });
+    }
+  });
 
   const hasConflict = matches.length > 0;
   const result = hasConflict ? 'conflict' : 'no_conflict';

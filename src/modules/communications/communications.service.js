@@ -449,8 +449,38 @@ const getAllCommunications = async (query = {}, user) => {
   await ensureTableExists();
   const { q = '', type = 'All', contact_id = 'All', sort = 'Newest', limit = 500 } = query;
 
+  // ── CLIENT PRIVACY GUARD ──────────────────────────────────────────────────
+  // Clients must ONLY see messages from their own matters.
+  // Admin and lawyers see everything.
+  let matterIdFilter = '';
+  if (user?.role === 'client') {
+    // Find the client record linked to this user
+    const clientRecord = await prisma.client.findFirst({
+      where: { user_id: user.id },
+      select: { id: true }
+    });
+    if (clientRecord) {
+      // Get matter IDs that belong to this client
+      const clientMatters = await prisma.matter.findMany({
+        where: { client_id: clientRecord.id },
+        select: { id: true }
+      });
+      const matterIds = clientMatters.map(m => m.id);
+      if (matterIds.length === 0) {
+        // Client has no matters — return empty
+        return { communications: [], stats: { total: 0, calls: 0, emails: 0, sms: 0, meetings: 0, notes: 0 } };
+      }
+      matterIdFilter = `WHERE matter_id IN (${matterIds.join(',')})`;
+    } else {
+      // No client record found — return empty for safety
+      return { communications: [], stats: { total: 0, calls: 0, emails: 0, sms: 0, meetings: 0, notes: 0 } };
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   const rows = await prisma.$queryRawUnsafe(`
     SELECT * FROM matter_communications 
+    ${matterIdFilter}
     ORDER BY communication_date DESC
     LIMIT ${parseInt(limit, 10) || 500}
   `);

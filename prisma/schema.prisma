@@ -230,6 +230,7 @@ model Matter {
   court_county         String?
   court_department     String?
   hearing_time         String?
+  case_value           Float?
   created_by_user_id   Int
   created_at           DateTime     @default(now())
   updated_at           DateTime     @updatedAt

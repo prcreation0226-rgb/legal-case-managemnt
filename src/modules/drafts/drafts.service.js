@@ -831,11 +831,6 @@ const getSignatureRequest = async (token) => {
     err.statusCode = 404;
     throw err;
   }
-  if (request.status === 'completed') {
-    const err = new Error('Signature already completed');
-    err.statusCode = 400;
-    throw err;
-  }
   if (new Date() > request.expires_at) {
     const err = new Error('Signature token expired');
     err.statusCode = 400;
@@ -846,6 +841,12 @@ const getSignatureRequest = async (token) => {
 
 const completeSignature = async (token, signature_data, ip_address, device_info) => {
   const request = await getSignatureRequest(token);
+
+  if (request.status === 'completed') {
+    const err = new Error('Signature already completed');
+    err.statusCode = 400;
+    throw err;
+  }
 
   return await prisma.$transaction(async (tx) => {
     // 1. Create Signature record

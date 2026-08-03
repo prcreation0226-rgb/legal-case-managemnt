@@ -28,6 +28,32 @@ exports.getTemplateById = async (req, res) => {
   }
 };
 
+// GET /api/court-forms/packages
+exports.getPackages = async (req, res) => {
+  try {
+    const packages = await courtFormsService.getPackages();
+    res.json({ data: packages });
+  } catch (e) {
+    console.error('[COURT_FORMS] Error getting packages:', e.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// POST /api/court-forms/generate-package
+exports.generatePackage = async (req, res) => {
+  try {
+    const { package_id, matter_id, selected_forms, selectedForms } = req.body;
+    if (!package_id || !matter_id) {
+      return res.status(400).json({ error: 'package_id and matter_id are required' });
+    }
+    const result = await courtFormsService.generatePackage(package_id, matter_id, req.user, selected_forms || selectedForms);
+    res.json({ data: result });
+  } catch (e) {
+    console.error('[COURT_FORMS] Error generating package:', e.message);
+    res.status(e.statusCode || 500).json({ error: e.message || 'Internal server error' });
+  }
+};
+
 // GET /api/court-forms/prefill?matter_id=X
 exports.prefill = async (req, res) => {
   try {

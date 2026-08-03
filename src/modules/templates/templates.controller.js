@@ -48,8 +48,10 @@ const remove = async (req, res, next) => {
 
 const cloneToMatter = async (req, res, next) => {
   try {
-    const { template_id, matter_id } = req.body;
-    const data = await service.cloneToMatter(template_id, matter_id, req.user);
+    const { template_id, templateId, id, matter_id, matterId, title, content, category } = req.body;
+    const targetTemplateId = template_id || templateId || id;
+    const targetMatterId = matter_id || matterId;
+    const data = await service.cloneToMatter(targetTemplateId, targetMatterId, req.user, { title, content, category });
     res.status(200).json(sendResponse(true, 'Template cloned successfully', data));
   } catch (err) {
     next(err);

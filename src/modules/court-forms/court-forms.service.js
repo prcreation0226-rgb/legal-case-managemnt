@@ -145,15 +145,172 @@ async function loadRepairablePdf(pdfBuffer) {
   return pdfDoc;
 }
 
+// ── MASTER FORM & PACKAGE DEFINITIONS FROM EXCEL BLUEPRINTS ──
+const MASTER_FORM_TEMPLATES = [
+  // Civil Litigation Forms (California JC & County Specific)
+  { form_number: 'SUM-100', title: 'Summons (Civil Case)', practice_area: 'Civil Litigation' },
+  { form_number: 'CM-010', title: 'Civil Case Cover Sheet', practice_area: 'Civil Litigation' },
+  { form_number: 'CIV 109', title: 'Civil Case Cover Sheet Addendum & Location Statement (LASC)', practice_area: 'Civil Litigation' },
+  { form_number: '13-16503-360', title: 'Certificate of Assignment (SBSC San Bernardino)', practice_area: 'Civil Litigation' },
+  { form_number: 'CIV-010', title: 'Application and Order for Appointment of Guardian ad Litem - Civil', practice_area: 'Civil Litigation' },
+  { form_number: 'CM-020', title: 'Notice of Related Case', practice_area: 'Civil Litigation' },
+  { form_number: 'FW-001', title: 'Request to Waive Court Fees', practice_area: 'Civil Litigation' },
+  { form_number: 'FW-003', title: 'Order on Court Fee Waiver', practice_area: 'Civil Litigation' },
+  { form_number: 'POS-010', title: 'Proof of Service of Summons', practice_area: 'Civil Litigation' },
+  { form_number: 'POS-020', title: 'Proof of Personal Service - Civil', practice_area: 'Civil Litigation' },
+  { form_number: 'POS-030', title: 'Proof of Service by First-Class Mail - Civil', practice_area: 'Civil Litigation' },
+  { form_number: 'CIV-050', title: 'Statement of Damages (Personal Injury or Wrongful Death)', practice_area: 'Civil Litigation' },
+  { form_number: 'CIV-100', title: 'Request for Entry of Default', practice_area: 'Civil Litigation' },
+  { form_number: 'CIV-110', title: 'Request for Dismissal', practice_area: 'Civil Litigation' },
+  { form_number: 'DISC-001', title: 'Form Interrogatories - General', practice_area: 'Civil Litigation' },
+  { form_number: 'DISC-002', title: 'Form Interrogatories - Employment Law', practice_area: 'Civil Litigation' },
+  { form_number: 'MC-010', title: 'Memorandum of Costs (Summary)', practice_area: 'Civil Litigation' },
+  { form_number: 'MC-011', title: 'Memorandum of Costs (Worksheet)', practice_area: 'Civil Litigation' },
+  { form_number: 'MC-025', title: 'Attachment to Judicial Council Form', practice_area: 'Civil Litigation' },
+
+  // Immigration Forms (USCIS, EOIR, DOS)
+  { form_number: 'G-28', title: 'Notice of Entry of Appearance as Attorney or Accredited Representative (USCIS)', practice_area: 'Immigration' },
+  { form_number: 'EOIR-28', title: 'Notice of Entry of Appearance Before Immigration Court (EOIR)', practice_area: 'Immigration' },
+  { form_number: 'EOIR-27', title: 'Notice of Entry of Appearance Before Board of Immigration Appeals (BIA)', practice_area: 'Immigration' },
+  { form_number: 'EOIR-33/IC', title: "Alien's Change of Address Form / Immigration Court", practice_area: 'Immigration' },
+  { form_number: 'EOIR-33/BIA', title: "Alien's Change of Address Form / Board of Immigration Appeals", practice_area: 'Immigration' },
+  { form_number: 'AR-11', title: "Alien's Change of Address Card (USCIS)", practice_area: 'Immigration' },
+  { form_number: 'G-1145', title: 'E-Notification of Application/Petition Acceptance', practice_area: 'Immigration' },
+  { form_number: 'G-1450', title: 'Authorization for Credit Card Transactions', practice_area: 'Immigration' },
+  { form_number: 'G-1650', title: 'Authorization for ACH Transactions', practice_area: 'Immigration' },
+  { form_number: 'I-912', title: 'Request for Fee Waiver', practice_area: 'Immigration' },
+  { form_number: 'I-130', title: 'Petition for Alien Relative', practice_area: 'Immigration' },
+  { form_number: 'I-130A', title: 'Supplemental Information for Spouse Beneficiary', practice_area: 'Immigration' },
+  { form_number: 'I-485', title: 'Application to Register Permanent Residence or Adjust Status', practice_area: 'Immigration' },
+  { form_number: 'I-765', title: 'Application for Employment Authorization (EAD)', practice_area: 'Immigration' },
+  { form_number: 'I-131', title: 'Application for Travel Document (Advance Parole)', practice_area: 'Immigration' },
+  { form_number: 'I-864', title: 'Affidavit of Support Under Section 213A of the INA', practice_area: 'Immigration' },
+  { form_number: 'I-864A', title: 'Contract Between Sponsor and Household Member', practice_area: 'Immigration' },
+  { form_number: 'I-589', title: 'Application for Asylum and for Withholding of Removal', practice_area: 'Immigration' },
+  { form_number: 'EOIR-42B', title: 'Application for Cancellation of Removal for Nonpermanent Residents', practice_area: 'Immigration' },
+  { form_number: 'N-400', title: 'Application for Naturalization', practice_area: 'Immigration' },
+  { form_number: 'I-918', title: 'Petition for U Nonimmigrant Status', practice_area: 'Immigration' },
+  { form_number: 'I-918 Supp B', title: 'U Nonimmigrant Status Certification (Law Enforcement)', practice_area: 'Immigration' },
+  { form_number: 'I-601A', title: 'Application for Provisional Unlawful Presence Waiver', practice_area: 'Immigration' },
+];
+
+const MASTER_FILING_PACKAGES = [
+  {
+    id: 'marriage-aos',
+    title: '💍 Marriage-Based Adjustment of Status (AOS)',
+    category: 'Immigration',
+    description: 'Complete USCIS package for spouse of US Citizen adjusting status in the US.',
+    forms: ['G-28', 'I-130', 'I-130A', 'I-485', 'I-765', 'I-131', 'I-864', 'G-1450']
+  },
+  {
+    id: 'family-consular',
+    title: '👨‍👩‍👧 Family Petition - Consular Processing',
+    category: 'Immigration',
+    description: 'Petition for alien relative processing through NVC and embassy/consulate.',
+    forms: ['G-28', 'I-130', 'I-130A', 'G-1450']
+  },
+  {
+    id: 'defensive-asylum',
+    title: '🛡️ Defensive Asylum (Immigration Court)',
+    category: 'Immigration',
+    description: 'Removal defense asylum filing package before Immigration Judge.',
+    forms: ['EOIR-28', 'I-589', 'EOIR-33/IC', 'I-765']
+  },
+  {
+    id: 'non-lpr-cancellation',
+    title: '⚖️ Non-LPR Cancellation of Removal',
+    category: 'Immigration',
+    description: 'EOIR 10-year cancellation package for non-permanent residents.',
+    forms: ['EOIR-28', 'EOIR-42B', 'EOIR-33/IC']
+  },
+  {
+    id: 'u-visa-petition',
+    title: '🕊️ U Visa Victim Petition',
+    category: 'Immigration',
+    description: 'U-nonimmigrant petition package with law enforcement certification.',
+    forms: ['G-28', 'I-918', 'I-918 Supp B']
+  },
+  {
+    id: 'naturalization',
+    title: '🇺🇸 Naturalization / Citizenship',
+    category: 'Immigration',
+    description: 'US Citizenship application package.',
+    forms: ['G-28', 'N-400', 'I-912']
+  },
+  {
+    id: 'la-civil-initiation',
+    title: '🏛️ LA County Civil Case Initiation Packet',
+    category: 'Civil Litigation',
+    description: 'Los Angeles Superior Court complaint filing packet.',
+    forms: ['SUM-100', 'CM-010', 'CIV 109', 'CIV-010', 'POS-010']
+  },
+  {
+    id: 'sb-civil-initiation',
+    title: '🏛️ San Bernardino Civil Case Initiation Packet',
+    category: 'Civil Litigation',
+    description: 'San Bernardino Superior Court complaint filing packet with Certificate of Assignment.',
+    forms: ['SUM-100', 'CM-010', '13-16503-360', 'POS-010']
+  },
+  {
+    id: 'sd-civil-initiation',
+    title: '🏛️ San Diego Civil Case Initiation Packet',
+    category: 'Civil Litigation',
+    description: 'San Diego Superior Court complaint filing packet with local ADR notices.',
+    forms: ['SUM-100', 'CM-010', 'POS-010']
+  }
+];
+
+let cleanedUpEmpty = false;
+
+const cleanupEmptyTemplates = async () => {
+  if (cleanedUpEmpty) return;
+  try {
+    // 1. Delete orphaned generated form drafts whose template_id is missing or points to deleted template
+    const validTemplates = await prisma.courtFormTemplate.findMany({
+      where: { pdf_path: { not: null } },
+      select: { id: true }
+    });
+    const validIds = validTemplates.map(t => t.id);
+
+    await prisma.generatedForm.deleteMany({
+      where: {
+        template_id: { notIn: validIds }
+      }
+    });
+
+    // 2. Delete empty templates with no pdf_path
+    await prisma.courtFormTemplate.deleteMany({
+      where: {
+        OR: [
+          { pdf_path: null },
+          { pdf_path: '' }
+        ]
+      }
+    });
+    cleanedUpEmpty = true;
+  } catch (e) {
+    console.error('Failed to cleanup empty templates & orphaned drafts:', e.message);
+  }
+};
+
 // ── TEMPLATES ────────────────────────────────────────────────
 exports.getTemplates = async (query = {}) => {
+  await cleanupEmptyTemplates();
+
   const { search, practice_area } = query;
-  const where = { is_active: true };
-  if (practice_area) where.practice_area = practice_area;
+  const where = {
+    is_active: true,
+    pdf_path: { not: null }
+  };
+  if (practice_area && practice_area !== 'All') where.practice_area = practice_area;
   if (search) {
-    where.OR = [
-      { form_number: { contains: search } },
-      { title: { contains: search } },
+    where.AND = [
+      {
+        OR: [
+          { form_number: { contains: search } },
+          { title: { contains: search } },
+        ]
+      }
     ];
   }
   return prisma.courtFormTemplate.findMany({
@@ -167,6 +324,108 @@ exports.getTemplateById = async (id) => {
     where: { id: parseInt(id) },
     include: { mappings: true, field_mappings: true },
   });
+};
+
+exports.getPackages = async () => {
+  const templates = await prisma.courtFormTemplate.findMany();
+  const templateMap = {};
+  templates.forEach(t => {
+    if (t.form_number) {
+      templateMap[t.form_number.trim().toUpperCase()] = t;
+    }
+  });
+
+  return MASTER_FILING_PACKAGES.map(pkg => {
+    const enrichedForms = pkg.forms.map(formNum => {
+      const normKey = formNum.trim().toUpperCase();
+      const existing = templateMap[normKey];
+      const masterDef = MASTER_FORM_TEMPLATES.find(m => m.form_number.trim().toUpperCase() === normKey) || {};
+      const cleanLower = formNum.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const defaultUrl = formNum.startsWith('I-') || formNum.startsWith('G-') || formNum.startsWith('N-') || formNum.startsWith('AR-')
+        ? `https://www.uscis.gov/${cleanLower}`
+        : formNum.startsWith('EOIR')
+        ? `https://www.justice.gov/eoir/eoir-form-list`
+        : `https://courts.ca.gov/forms.htm`;
+
+      return {
+        form_number: formNum,
+        title: existing?.title || masterDef.title || formNum,
+        template_id: existing?.id || null,
+        has_pdf: !!(existing?.pdf_path),
+        pdf_path: existing?.pdf_path || null,
+        source_url: masterDef.source_url || defaultUrl
+      };
+    });
+
+    const pdfCount = enrichedForms.filter(f => f.has_pdf).length;
+
+    return {
+      ...pkg,
+      enriched_forms: enrichedForms,
+      pdf_ready_count: pdfCount,
+      total_forms_count: enrichedForms.length
+    };
+  });
+};
+
+exports.generatePackage = async (packageId, matterId, user, selectedForms = null) => {
+  const pkg = MASTER_FILING_PACKAGES.find(p => p.id === packageId);
+  if (!pkg) {
+    const err = new Error('Package definition not found');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const prefilledData = await exports.prefillForMatter(matterId);
+
+  const formsToGenerate = Array.isArray(selectedForms) && selectedForms.length > 0
+    ? pkg.forms.filter(f => selectedForms.map(sf => sf.trim().toUpperCase()).includes(f.trim().toUpperCase()))
+    : pkg.forms;
+
+  const createdDrafts = [];
+  for (const formNum of formsToGenerate) {
+    const normKey = formNum.trim();
+    let t = await prisma.courtFormTemplate.findFirst({
+      where: {
+        OR: [
+          { form_number: normKey },
+          { form_number: normKey.toUpperCase() },
+          { form_number: normKey.toLowerCase() }
+        ]
+      }
+    });
+
+    if (!t) {
+      const masterDef = MASTER_FORM_TEMPLATES.find(m => m.form_number.trim().toUpperCase() === normKey.toUpperCase()) || { title: formNum, practice_area: pkg.category };
+      t = await prisma.courtFormTemplate.create({
+        data: {
+          form_number: normKey,
+          title: masterDef.title,
+          practice_area: masterDef.practice_area,
+          is_active: true
+        }
+      });
+    }
+
+    const draft = await prisma.generatedForm.create({
+      data: {
+        template_id: t.id,
+        matter_id: parseInt(matterId),
+        form_data: prefilledData,
+        status: 'draft',
+        created_by: (user && user.id) ? parseInt(user.id) : 1
+      },
+      include: { template: true }
+    });
+    createdDrafts.push(draft);
+  }
+
+  return {
+    package: pkg,
+    matter_id: parseInt(matterId),
+    drafts_created: createdDrafts.length,
+    drafts: createdDrafts
+  };
 };
 
 // ── PREFILL DATA ASSEMBLY ────────────────────────────────────
@@ -664,8 +923,10 @@ function getCleanFieldName(pdfFieldName) {
 }
 
 exports.uploadTemplate = async (metaData, file) => {
-  const { form_number, title, practice_area } = metaData;
-  if (!form_number || !title) throw new Error('Form number and title are required');
+  const { form_number } = metaData;
+  const title = metaData.title || form_number;
+  const practice_area = metaData.practice_area || 'General Practice';
+  if (!form_number) throw new Error('Form number is required');
   if (!file) throw new Error('PDF file is required');
 
   // Enforce size limit (25 MB) and MIME/signature constraints
@@ -715,39 +976,55 @@ exports.uploadTemplate = async (metaData, file) => {
     throw new Error('Failed to save repaired/normalized PDF template: ' + saveErr.message);
   }
 
-  // Overwrite existing templates with same form number
-  const normFormNum = form_number.trim().toUpperCase();
-  const existingForm = await prisma.courtFormTemplate.findUnique({
-    where: { form_number: normFormNum }
-  });
-  if (existingForm) {
-    const oldPdfPath = path.join(process.cwd(), existingForm.pdf_path);
-    if (fsSync.existsSync(oldPdfPath)) {
-      try { await fs.unlink(oldPdfPath); } catch (e) { console.error('[PDF_UPLOAD] Failed to delete old pdf:', e.message); }
+  // Upsert/Update existing template record with same form number
+  const normFormNum = form_number.trim();
+  let template = await prisma.courtFormTemplate.findFirst({
+    where: {
+      OR: [
+        { form_number: normFormNum },
+        { form_number: normFormNum.toUpperCase() },
+        { form_number: normFormNum.toLowerCase() }
+      ]
     }
-    await prisma.courtFormTemplate.delete({
-      where: { id: existingForm.id }
+  });
+
+  if (template) {
+    if (template.pdf_path) {
+      const oldPdfPath = path.join(process.cwd(), template.pdf_path);
+      if (fsSync.existsSync(oldPdfPath)) {
+        try { await fs.unlink(oldPdfPath); } catch (e) {}
+      }
+    }
+    template = await prisma.courtFormTemplate.update({
+      where: { id: template.id },
+      data: {
+        pdf_path: relativePdfPath,
+        title: title.trim() || template.title,
+        practice_area: practice_area ? practice_area.trim() : template.practice_area
+      }
+    });
+  } else {
+    template = await prisma.courtFormTemplate.create({
+      data: {
+        form_number: normFormNum,
+        title: title.trim(),
+        practice_area: practice_area ? practice_area.trim() : null,
+        pdf_path: relativePdfPath,
+      }
     });
   }
-
-  // Save template record in database
-  const template = await prisma.courtFormTemplate.create({
-    data: {
-      form_number: normFormNum,
-      title: title.trim(),
-      practice_area: practice_area ? practice_area.trim() : null,
-      pdf_path: relativePdfPath,
-    }
-  });
 
   try {
     // Attempt Auto-Mapping based on field names
     const acroForm = pdfDoc.catalog.get(pdfDoc.context.obj('AcroForm'));
     if (acroForm) {
       const fields = pdfDoc.getForm().getFields();
+      const seenFields = new Set();
       const mappingsToCreate = [];
       for (const field of fields) {
         const fieldName = field.getName();
+        if (seenFields.has(fieldName)) continue;
+        seenFields.add(fieldName);
         const systemField = autoMapFieldName(fieldName);
         if (systemField) {
           mappingsToCreate.push({
@@ -758,7 +1035,7 @@ exports.uploadTemplate = async (metaData, file) => {
         }
       }
       if (mappingsToCreate.length > 0) {
-        await prisma.courtFormMapping.createMany({ data: mappingsToCreate });
+        await prisma.courtFormMapping.createMany({ data: mappingsToCreate, skipDuplicates: true });
       }
     }
   } catch (autoMapErr) {

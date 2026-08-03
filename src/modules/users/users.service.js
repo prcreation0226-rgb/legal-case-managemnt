@@ -220,8 +220,6 @@ const remove = async (id) => {
     const matterIds = clientMatters.map(m => m.id);
 
     if (matterIds.length > 0) {
-      // Delete conflict checks
-      await prisma.conflictCheck.deleteMany({ where: { matter_id: { in: matterIds } } });
       // Delete time entries
       await prisma.timeEntry.deleteMany({ where: { matter_id: { in: matterIds } } });
       // Delete tasks

@@ -1031,3 +1031,85 @@ model MatterCommunication {
   @@map("matter_communications")
 }
 
+model TeamChatMessage {
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  channel    String   @default("general") @db.VarChar(100)
+  message    String   @db.Text
+  is_deleted Boolean  @default(false)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([channel], map: "idx_chat_channel")
+  @@index([created_at], map: "idx_chat_created")
+  @@map("team_chat_messages")
+}
+
+model ESignatureRequest {
+  id                    Int       @id @default(autoincrement())
+  document_id           Int?
+  matter_id             Int?
+  client_id             Int?
+  signer_name           String    @db.VarChar(255)
+  signer_email          String    @db.VarChar(255)
+  title                 String    @db.VarChar(255)
+  provider              String    @default("native") @db.VarChar(50) // native, digisigner, adobesign
+  status                String    @default("pending") @db.VarChar(50) // pending, sent, viewed, signed, declined
+  external_id           String?   @db.VarChar(255)
+  signature_url         String?   @db.Text
+  signed_at             DateTime?
+  created_by            Int?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  @@index([matter_id], map: "idx_esign_matter")
+  @@index([status], map: "idx_esign_status")
+  @@map("esign_requests")
+}
+
+model PhysicalMailDispatch {
+  id                    Int       @id @default(autoincrement())
+  document_id           Int?
+  matter_id             Int?
+  recipient_name        String    @db.VarChar(255)
+  address_line1         String    @db.VarChar(255)
+  address_line2         String?   @db.VarChar(255)
+  city                  String    @db.VarChar(100)
+  state                 String    @db.VarChar(100)
+  postal_code           String    @db.VarChar(20)
+  mail_type             String    @default("usps_certified") @db.VarChar(50) // usps_certified, usps_first_class, registered
+  provider              String    @default("lob") @db.VarChar(50) // lob, click2mail, adept
+  status                String    @default("queued") @db.VarChar(50) // queued, printed, in_transit, delivered
+  tracking_number       String?   @db.VarChar(100)
+  tracking_url          String?   @db.Text
+  cost                  Float?    @default(0.0)
+  created_by            Int?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  @@index([matter_id], map: "idx_mail_matter")
+  @@index([status], map: "idx_mail_status")
+  @@map("physical_mail_dispatches")
+}
+
+model CourtEFilingSubmission {
+  id                    Int       @id @default(autoincrement())
+  matter_id             Int?
+  generated_form_id     Int?
+  court_name            String    @db.VarChar(255)
+  case_number           String?   @db.VarChar(100)
+  efsp_provider         String    @default("journal_tech") @db.VarChar(50) // journal_tech, trellis, legalconnect
+  status                String    @default("draft") @db.VarChar(50) // draft, submitted, accepted, rejected, stamped
+  envelope_id           String?   @db.VarChar(255)
+  confirmation_number   String?   @db.VarChar(255)
+  stamped_document_url  String?   @db.Text
+  filing_fee            Float?    @default(0.0)
+  created_by            Int?
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  @@index([matter_id], map: "idx_efile_matter")
+  @@index([status], map: "idx_efile_status")
+  @@map("court_efiling_submissions")
+}
+

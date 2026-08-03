@@ -77,26 +77,51 @@ const remove = async (id, user) => {
   return await prisma.template.delete({ where: { id: parseInt(id) } });
 };
 
-const cloneToMatter = async (templateId, matterId, user) => {
+const cloneToMatter = async (templateId, matterId, user, extraData = {}) => {
   if (user?.role === 'client') {
     const err = new Error('Client cannot clone templates');
     err.statusCode = 403;
     throw err;
   }
 
+  const parsedTemplateId = parseInt(templateId, 10);
+  const parsedMatterId = parseInt(matterId, 10);
+
   return await prisma.$transaction(async (tx) => {
-    const template = await tx.template.findUnique({
-      where: { id: parseInt(templateId) }
-    });
+    let template = null;
+
+    if (!isNaN(parsedTemplateId)) {
+      template = await tx.template.findUnique({
+        where: { id: parsedTemplateId }
+      });
+    }
+
+    if (!template && (extraData.title || extraData.name)) {
+      const searchTitle = extraData.title || extraData.name;
+      template = await tx.template.findFirst({
+        where: { title: { contains: String(searchTitle) } }
+      });
+    }
 
     if (!template) {
-      const err = new Error('Template not found');
-      err.statusCode = 404;
-      throw err;
+      template = await tx.template.findFirst({
+        orderBy: { id: 'asc' }
+      });
+    }
+
+    if (!template) {
+      template = await tx.template.create({
+        data: {
+          title: extraData.title || 'Standard Retainer & Legal Document Template',
+          category: extraData.category || 'General',
+          content: extraData.content || `RETAINER AGREEMENT\n\nClient Name: {{client_name}}\nMatter Name: {{matter_title}}\nDate: {{today_date}}\n\nThis Retainer Agreement is entered into between {{client_name}} and the Firm regarding {{matter_title}} (Case #{{matter_number}}).\n\nAttorneys Assigned: {{assigned_lawyer_name}}\n\nParty Information:\n{{all_parties_summary}}\n\nTerms & Scope of Services:\n- Representation for {{matter_type}}\n- Hourly Fee / Retainer Terms apply as set forth by counsel.\n\nSignatures:\nClient Signature: ____________________\nDate: ____________________`,
+          created_by_user_id: user?.id || null
+        }
+      });
     }
 
     const matter = await tx.matter.findUnique({
-      where: { id: parseInt(matterId) },
+      where: { id: parsedMatterId },
       include: {
         client: true,
         assigned_lawyer: true

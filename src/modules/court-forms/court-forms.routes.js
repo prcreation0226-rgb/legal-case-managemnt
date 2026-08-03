@@ -40,6 +40,10 @@ router.get('/templates/:id/download', controller.downloadTemplateOriginal);
 router.post('/templates/:id/mappings', controller.saveMappings);
 router.delete('/templates/:id', controller.deleteTemplate);
 
+// Packages (Bundled Form Filings)
+router.get('/packages', controller.getPackages);
+router.post('/generate-package', controller.generatePackage);
+
 // Prefill system data for a matter
 router.get('/prefill', controller.prefill);
 

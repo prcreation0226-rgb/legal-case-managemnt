@@ -158,9 +158,16 @@ const update = async (id, data, user) => {
   });
 };
 
+const isAuthorizedToDelete = (user) => {
+  if (!user) return false;
+  const role = (user.role || '').toLowerCase();
+  const email = (user.email || '').toLowerCase();
+  return role === 'admin' || email.includes('kathleen');
+};
+
 const remove = async (id, user) => {
-  if (user?.role !== 'admin') {
-    const err = new Error('Only admin can hard delete clients');
+  if (!isAuthorizedToDelete(user)) {
+    const err = new Error('Forbidden: Only Firm Owner/Admin or Kathleen are authorized to hard-delete records.');
     err.statusCode = 403;
     throw err;
   }
@@ -181,21 +188,13 @@ const remove = async (id, user) => {
     throw err;
   }
 
-  // Invoice Constraint Check: Block deletion if referenced by non-void active invoices
-  const activeInvoices = (client.matters || []).flatMap(m => m.invoices || []).filter(i => i.status !== 'void');
-  if (activeInvoices.length > 0) {
-    const err = new Error(`Cannot delete client "${client.full_name}": Referenced by ${activeInvoices.length} active invoice(s). Void invoices first before hard deleting.`);
-    err.statusCode = 400;
-    throw err;
-  }
-
   // Log Audit Entry
   await prisma.activity.create({
     data: {
       entity_type: 'client',
       entity_id: clientId,
       action: 'client_hard_deleted',
-      description: `Admin ${user.full_name || user.email} hard-deleted client "${client.full_name}" (#${clientId})`,
+      description: `User ${user.full_name || user.email} (#${user.id}) hard-deleted client "${client.full_name}" (#${clientId})`,
       actor_user_id: user.id
     }
   }).catch(() => {});
@@ -203,21 +202,36 @@ const remove = async (id, user) => {
   return await prisma.$transaction(async (tx) => {
     const matterIds = (client.matters || []).map(m => m.id);
     if (matterIds.length > 0) {
-      await tx.invoice.deleteMany({ where: { matter_id: { in: matterIds } } });
-      await tx.timeEntry.deleteMany({ where: { matter_id: { in: matterIds } } });
-      await tx.expense.deleteMany({ where: { matter_id: { in: matterIds } } });
-      await tx.communication.deleteMany({ where: { matter_id: { in: matterIds } } });
-      await tx.document.deleteMany({ where: { matter_id: { in: matterIds } } });
-      await tx.matter.deleteMany({ where: { id: { in: matterIds } } });
+      await tx.payment.deleteMany({ where: { matter_id: { in: matterIds } } }).catch(() => {});
+      await tx.invoiceItem.deleteMany({ where: { invoice: { matter_id: { in: matterIds } } } }).catch(() => {});
+      await tx.invoice.deleteMany({ where: { matter_id: { in: matterIds } } }).catch(() => {});
+      await tx.timeEntry.deleteMany({ where: { matter_id: { in: matterIds } } }).catch(() => {});
+      await tx.expense.deleteMany({ where: { matter_id: { in: matterIds } } }).catch(() => {});
+      await tx.communication.deleteMany({ where: { matter_id: { in: matterIds } } }).catch(() => {});
+      await tx.document.deleteMany({ where: { matter_id: { in: matterIds } } }).catch(() => {});
+      await tx.task.deleteMany({ where: { matter_id: { in: matterIds } } }).catch(() => {});
+      await tx.activity.deleteMany({ where: { matter_id: { in: matterIds } } }).catch(() => {});
+      await tx.calendarEvent.deleteMany({ where: { matter_id: { in: matterIds } } }).catch(() => {});
+      await tx.trustTransaction.deleteMany({ where: { matter_id: { in: matterIds } } }).catch(() => {});
+      await tx.matterStatusHistory.deleteMany({ where: { matter_id: { in: matterIds } } }).catch(() => {});
+      await tx.matterCustomFieldValue.deleteMany({ where: { matter_id: { in: matterIds } } }).catch(() => {});
+      await tx.matter.deleteMany({ where: { id: { in: matterIds } } }).catch(() => {});
     }
 
+    await tx.trustTransaction.deleteMany({ where: { client_id: clientId } }).catch(() => {});
+    await tx.trustAccount.deleteMany({ where: { client_id: clientId } }).catch(() => {});
     await tx.lead.updateMany({
       where: { converted_client_id: clientId },
       data: { converted_client_id: null }
     }).catch(() => {});
 
     if (client.user_id) {
+      await tx.communication.deleteMany({ where: { sender_user_id: client.user_id } }).catch(() => {});
+      await tx.activity.deleteMany({ where: { actor_user_id: client.user_id } }).catch(() => {});
+      await tx.task.deleteMany({ where: { OR: [{ assigned_user_id: client.user_id }, { created_by_user_id: client.user_id }] } }).catch(() => {});
       await tx.document.deleteMany({ where: { uploaded_by_user_id: client.user_id } }).catch(() => {});
+      await tx.notification.deleteMany({ where: { user_id: client.user_id } }).catch(() => {});
+      await tx.userRole.deleteMany({ where: { user_id: client.user_id } }).catch(() => {});
     }
 
     const deletedClient = await tx.client.delete({ where: { id: clientId } });

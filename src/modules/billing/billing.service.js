@@ -502,8 +502,11 @@ const update = async (id, data, user) => {
 };
 
 const remove = async (id, user) => {
-  if (user?.role !== 'admin') {
-    const err = new Error('Only admin can delete invoices');
+  const role = (user?.role || '').toLowerCase();
+  const email = (user?.email || '').toLowerCase();
+  const isAuth = role === 'admin' || email.includes('kathleen');
+  if (!isAuth) {
+    const err = new Error('Forbidden: Only Firm Owner/Admin or Kathleen are authorized to hard-delete records.');
     err.statusCode = 403;
     throw err;
   }

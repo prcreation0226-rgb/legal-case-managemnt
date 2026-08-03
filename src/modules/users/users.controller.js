@@ -52,6 +52,12 @@ const resetPassword = async (req, res, next) => {
 
 const remove = async (req, res, next) => {
   try {
+    const role = (req.user?.role || '').toLowerCase();
+    const email = (req.user?.email || '').toLowerCase();
+    const isAuth = role === 'admin' || email.includes('kathleen');
+    if (!isAuth) {
+      return res.status(403).json(sendResponse(false, 'Forbidden: Only Firm Owner/Admin or Kathleen are authorized to hard-delete records.'));
+    }
     const targetId = parseInt(req.params.id);
     if (req.user.id === targetId) {
       return res.status(400).json(sendResponse(false, 'You cannot delete your own account'));

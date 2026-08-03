@@ -63,6 +63,10 @@ app.use('/api/activities', require('./modules/activities/activities.routes'));
 app.use('/api/court-forms', require('./modules/court-forms/court-forms.routes'));
 app.use('/api/titan-email', require('./routes/titanEmail.routes'));
 app.use('/api/expenses', require('./modules/expenses/expenses.routes'));
+app.use('/api/team-chat', require('./modules/team-chat/team-chat.routes'));
+app.use('/api/esign', require('./modules/esign/esign.routes'));
+app.use('/api/physical-mail', require('./modules/physical-mail/mail.routes'));
+app.use('/api/court-efiling', require('./modules/court-efiling/efiling.routes'));
 
 // Error Handling
 app.use(errorHandler);

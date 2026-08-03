@@ -31,9 +31,9 @@ async function getLinkedMattersCount(clientId) {
 }
 
 function parseContactNotes(notesStr) {
-  if (!notesStr) return { notes: '', is_referral_source: false, referral_category: 'attorney', default_fee_terms: '', driver_license: '', alien_registration_number: '' };
+  if (!notesStr) return { notes: '', is_referral_source: false, referral_category: 'attorney', default_fee_terms: '', driver_license: '', alien_registration_number: '', category_type: 'General', department: '', vendor_service: '' };
   try {
-    if (typeof notesStr === 'string' && notesStr.startsWith('{"__meta":')) {
+    if (typeof notesStr === 'string' && (notesStr.startsWith('{"__meta":') || notesStr.startsWith('{"text":'))) {
       const parsed = JSON.parse(notesStr);
       return {
         notes: parsed.text || '',
@@ -41,11 +41,14 @@ function parseContactNotes(notesStr) {
         referral_category: parsed.__meta?.referral_category || 'attorney',
         default_fee_terms: parsed.__meta?.default_fee_terms || '',
         driver_license: parsed.__meta?.driver_license || '',
-        alien_registration_number: parsed.__meta?.alien_registration_number || ''
+        alien_registration_number: parsed.__meta?.alien_registration_number || '',
+        category_type: parsed.__meta?.category_type || 'General',
+        department: parsed.__meta?.department || '',
+        vendor_service: parsed.__meta?.vendor_service || ''
       };
     }
   } catch (e) {}
-  return { notes: notesStr, is_referral_source: false, referral_category: 'attorney', default_fee_terms: '', driver_license: '', alien_registration_number: '' };
+  return { notes: notesStr, is_referral_source: false, referral_category: 'attorney', default_fee_terms: '', driver_license: '', alien_registration_number: '', category_type: 'General', department: '', vendor_service: '' };
 }
 
 function serializeContactNotes(rawNotes, meta = {}) {
@@ -54,6 +57,9 @@ function serializeContactNotes(rawNotes, meta = {}) {
   const feeTerms = meta.default_fee_terms || '';
   const dl = meta.driver_license || '';
   const aNum = meta.alien_registration_number || '';
+  const categoryType = meta.category_type || 'General';
+  const department = meta.department || '';
+  const vendorService = meta.vendor_service || '';
 
   return JSON.stringify({
     text: rawNotes || '',
@@ -62,7 +68,10 @@ function serializeContactNotes(rawNotes, meta = {}) {
       referral_category: category,
       default_fee_terms: feeTerms,
       driver_license: dl,
-      alien_registration_number: aNum
+      alien_registration_number: aNum,
+      category_type: categoryType,
+      department: department,
+      vendor_service: vendorService
     }
   });
 }
@@ -77,6 +86,9 @@ function enrichContactData(c, linkedCount = 0) {
     default_fee_terms: parsed.default_fee_terms,
     driver_license: parsed.driver_license,
     alien_registration_number: parsed.alien_registration_number,
+    category_type: parsed.category_type,
+    department: parsed.department,
+    vendor_service: parsed.vendor_service,
     linked_matters_count: linkedCount
   };
 }
@@ -199,7 +211,7 @@ const findDuplicateContact = async (data = {}) => {
 };
 
 const create = async (data, user) => {
-  const { full_name, email, phone, party_type = 'Person', organization_name, address_line_1, city, state, postal_code, notes, is_referral_source, referral_category, default_fee_terms, government_id, driver_license, alien_registration_number } = data;
+  const { full_name, email, phone, party_type = 'Person', organization_name, address_line_1, city, state, postal_code, notes, is_referral_source, referral_category, default_fee_terms, government_id, driver_license, alien_registration_number, category_type, department, vendor_service } = data;
 
   if (!full_name || !full_name.trim()) {
     const err = new Error('Contact Name is required');
@@ -226,7 +238,10 @@ const create = async (data, user) => {
     referral_category,
     default_fee_terms,
     driver_license: driver_license ? encryptSensitiveValue(driver_license.trim()) : '',
-    alien_registration_number: alien_registration_number ? encryptSensitiveValue(alien_registration_number.trim()) : ''
+    alien_registration_number: alien_registration_number ? encryptSensitiveValue(alien_registration_number.trim()) : '',
+    category_type: category_type || 'General',
+    department: department || '',
+    vendor_service: vendor_service || ''
   });
 
   // Create new contact master entry
@@ -269,7 +284,7 @@ const update = async (id, data, user) => {
     throw err;
   }
 
-  const { full_name, email, phone, party_type, organization_name, address_line_1, city, state, postal_code, notes, is_referral_source, referral_category, default_fee_terms, government_id, driver_license, alien_registration_number } = data;
+  const { full_name, email, phone, party_type, organization_name, address_line_1, city, state, postal_code, notes, is_referral_source, referral_category, default_fee_terms, government_id, driver_license, alien_registration_number, category_type, department, vendor_service } = data;
 
   const existingMeta = parseContactNotes(existing.notes);
 
@@ -292,12 +307,19 @@ const update = async (id, data, user) => {
   const targetDL = driver_license !== undefined ? (driver_license ? encryptSensitiveValue(driver_license.trim()) : '') : existingMeta.driver_license;
   const targetANum = alien_registration_number !== undefined ? (alien_registration_number ? encryptSensitiveValue(alien_registration_number.trim()) : '') : existingMeta.alien_registration_number;
 
+  const targetCatType = category_type !== undefined ? category_type : existingMeta.category_type;
+  const targetDept = department !== undefined ? department : existingMeta.department;
+  const targetVendorSvc = vendor_service !== undefined ? vendor_service : existingMeta.vendor_service;
+
   updateData.notes = serializeContactNotes(targetNotes, {
     is_referral_source: targetIsRef,
     referral_category: targetCategory,
     default_fee_terms: targetFeeTerms,
     driver_license: targetDL,
-    alien_registration_number: targetANum
+    alien_registration_number: targetANum,
+    category_type: targetCatType || 'General',
+    department: targetDept || '',
+    vendor_service: targetVendorSvc || ''
   });
 
   const updated = await prisma.client.update({

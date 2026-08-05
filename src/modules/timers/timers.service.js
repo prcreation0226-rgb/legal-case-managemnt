@@ -26,10 +26,28 @@ const getActive = async (userId) => {
  * Start a new timer
  */
 const start = async (userId, matterId) => {
+  const numMatterId = Number(matterId);
+  if (!numMatterId || isNaN(numMatterId)) {
+    const err = new Error('Valid Matter ID is required.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const matter = await prisma.matter.findUnique({
+    where: { id: numMatterId },
+    select: { id: true },
+  });
+
+  if (!matter) {
+    const err = new Error('Selected matter does not exist in database.');
+    err.statusCode = 404;
+    throw err;
+  }
+
   // Check for active timer
   const active = await getActive(userId);
   if (active) {
-    if (active.matter_id === Number(matterId)) {
+    if (active.matter_id === numMatterId) {
       return active;
     }
     await stop(userId, active.id);
@@ -38,7 +56,7 @@ const start = async (userId, matterId) => {
   return await prisma.timeEntry.create({
     data: {
       user_id: userId,
-      matter_id: Number(matterId),
+      matter_id: numMatterId,
       start_time: new Date(),
       is_running: true,
     },

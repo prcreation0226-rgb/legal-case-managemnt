@@ -234,7 +234,7 @@ model Matter {
   matter_type          String
   opposing_party_name  String?
   description          String?      @db.Text
-  status               MatterStatus @default(pending)
+  status               String       @default("pending")
   priority             String       @default("medium")
   opened_at            DateTime?
   closed_at            DateTime?
@@ -293,8 +293,8 @@ model Matter {
 model MatterStatusHistory {
   id                Int      @id @default(autoincrement())
   matter_id         Int
-  old_status        MatterStatus
-  new_status        MatterStatus
+  old_status        String
+  new_status        String
   changed_by_user_id Int
   note              String?  @db.Text
   created_at        DateTime @default(now())

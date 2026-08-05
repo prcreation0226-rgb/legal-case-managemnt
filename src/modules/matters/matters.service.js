@@ -1934,95 +1934,95 @@ async function getMatterTimeline(id, query = {}, user) {
     });
   });
 
-  if (timelineItems.length === 0) {
-    timelineItems.push({
-      id: `synth_created_${id}`,
-      module: 'Matter',
-      icon: '⚖️',
-      action: 'matter_created',
-      title: 'Matter Initialized',
-      description: `Matter "${matter.title || 'Legal Case'}" was created and logged into case management system.`,
-      user_name: matter.assigned_lawyer?.full_name || 'Primary Counsel',
-      created_at: matter.created_at || new Date(),
-      date: new Date(matter.created_at || new Date()).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
-      time: new Date(matter.created_at || new Date()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-      related_matter: matter.title || `Matter #${id}`
-    });
+  // Always synthesize structural case events (Matter initialized, Parties, Vehicles, Documents)
+  // so module filtering works seamlessly across all modules
+  timelineItems.push({
+    id: `synth_created_${id}`,
+    module: 'Matter',
+    icon: '⚖️',
+    action: 'matter_created',
+    title: 'Matter Initialized',
+    description: `Matter "${matter.title || 'Legal Case'}" was created and logged into case management system.`,
+    user_name: matter.assigned_lawyer?.full_name || 'Primary Counsel',
+    created_at: matter.created_at || new Date(),
+    date: new Date(matter.created_at || new Date()).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
+    time: new Date(matter.created_at || new Date()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+    related_matter: matter.title || `Matter #${id}`
+  });
 
-    const parties = Array.isArray(matter.parties_data) ? matter.parties_data : [];
-    parties.forEach((p, idx) => {
-      const roles = p.party_roles || [p.party_role];
-      roles.forEach(role => {
-        let mod = 'Legal Parties';
-        let ic = '👤';
-        if (role === 'Driver') { mod = 'Driver'; ic = '🏎️'; }
-        else if (role === 'Passenger') { mod = 'Passenger'; ic = '👥'; }
-        else if (role === 'Witness') { mod = 'Witness'; ic = '👁️'; }
-        else if (role === 'Insurance Company' || role === 'Insurance Adjuster') { mod = 'Insurance'; ic = '🛡️'; }
-        else if (role === 'Medical Provider') { mod = 'Medical Provider'; ic = '🩹'; }
-        else if (role === 'Employer') { mod = 'Employer'; ic = '🏢'; }
-        else if (role === 'Property Damage') { mod = 'Property Damage'; ic = '🏠'; }
-        else if (role === 'Police') { mod = 'Police'; ic = '👮'; }
+  const parties = Array.isArray(matter.parties_data) ? matter.parties_data : [];
+  parties.forEach((p, idx) => {
+    const roles = p.party_roles || [p.party_role || 'Legal Parties'];
+    roles.forEach(role => {
+      let mod = 'Legal Parties';
+      let ic = '👤';
+      if (role === 'Driver') { mod = 'Driver'; ic = '🏎️'; }
+      else if (role === 'Passenger') { mod = 'Passenger'; ic = '👥'; }
+      else if (role === 'Witness') { mod = 'Witness'; ic = '👁️'; }
+      else if (role === 'Insurance Company' || role === 'Insurance Adjuster' || role === 'Insurance') { mod = 'Insurance'; ic = '🛡️'; }
+      else if (role === 'Medical Provider') { mod = 'Medical Provider'; ic = '🩹'; }
+      else if (role === 'Employer') { mod = 'Employer'; ic = '🏢'; }
+      else if (role === 'Property Damage') { mod = 'Property Damage'; ic = '🏠'; }
+      else if (role === 'Police' || role === 'Police Officer') { mod = 'Police'; ic = '👮'; }
 
-        timelineItems.push({
-          id: `synth_party_${p.id || idx}_${role}`,
-          module: mod,
-          icon: ic,
-          action: 'party_recorded',
-          title: `${mod} Profile Recorded`,
-          description: `${role} "${p.full_name || p.company_name}" recorded in matter file.`,
-          user_name: 'Case Manager',
-          created_at: p.created_at ? new Date(p.created_at) : new Date(matter.created_at || new Date()),
-          date: new Date(p.created_at || matter.created_at || new Date()).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
-          time: new Date(p.created_at || matter.created_at || new Date()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-          related_matter: matter.title,
-          related_party: p.full_name || p.company_name
-        });
-      });
-    });
-
-    const vehicles = Array.isArray(matter.vehicles_data) ? matter.vehicles_data : [];
-    vehicles.forEach((v, idx) => {
       timelineItems.push({
-        id: `synth_veh_${v.vehicle_id || v.id || idx}`,
-        module: 'Vehicle',
-        icon: '🚘',
-        action: 'vehicle_added',
-        title: 'Vehicle Added to Case',
-        description: `Recorded vehicle: ${v.year || ''} ${v.make || ''} ${v.model || ''} (VIN: ${v.vin || 'N/A'})`,
+        id: `synth_party_${p.id || idx}_${role}`,
+        module: mod,
+        icon: ic,
+        action: 'party_recorded',
+        title: `${mod} Profile Recorded`,
+        description: `${role} "${p.full_name || p.company_name || 'Party'}" recorded in matter file.`,
         user_name: 'Case Manager',
-        created_at: v.created_at ? new Date(v.created_at) : new Date(matter.created_at || new Date()),
-        date: new Date(v.created_at || matter.created_at || new Date()).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
-        time: new Date(v.created_at || matter.created_at || new Date()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-        related_matter: matter.title
+        created_at: p.created_at ? new Date(p.created_at) : new Date(matter.created_at || new Date()),
+        date: new Date(p.created_at || matter.created_at || new Date()).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
+        time: new Date(p.created_at || matter.created_at || new Date()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+        related_matter: matter.title,
+        related_party: p.full_name || p.company_name
       });
     });
+  });
 
-    const docs = Array.isArray(matter.documents) ? matter.documents : [];
-    docs.forEach((d, idx) => {
-      // Do not disclose internal documents on the client timeline
-      if (user?.role === 'client' && d.visibility !== 'client_shared' && d.visibility !== 'client_visible') return;
-
-      timelineItems.push({
-        id: `synth_doc_${d.id || idx}`,
-        module: 'Documents',
-        icon: '📄',
-        action: 'document_uploaded',
-        title: 'Document Uploaded',
-        description: `Uploaded document "${d.original_name}" under category "${d.category || 'General'}"`,
-        user_name: d.uploader?.full_name || 'System User',
-        created_at: d.created_at ? new Date(d.created_at) : new Date(matter.created_at || new Date()),
-        date: new Date(d.created_at || matter.created_at || new Date()).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
-        time: new Date(d.created_at || matter.created_at || new Date()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-        related_matter: matter.title
-      });
+  const vehicles = Array.isArray(matter.vehicles_data) ? matter.vehicles_data : [];
+  vehicles.forEach((v, idx) => {
+    timelineItems.push({
+      id: `synth_veh_${v.vehicle_id || v.id || idx}`,
+      module: 'Vehicle',
+      icon: '🚘',
+      action: 'vehicle_added',
+      title: 'Vehicle Added to Case',
+      description: `Recorded vehicle: ${v.year || ''} ${v.make || ''} ${v.model || ''} (VIN: ${v.vin || 'N/A'})`,
+      user_name: 'Case Manager',
+      created_at: v.created_at ? new Date(v.created_at) : new Date(matter.created_at || new Date()),
+      date: new Date(v.created_at || matter.created_at || new Date()).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
+      time: new Date(v.created_at || matter.created_at || new Date()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      related_matter: matter.title
     });
-  }
+  });
+
+  const docs = Array.isArray(matter.documents) ? matter.documents : [];
+  docs.forEach((d, idx) => {
+    // Do not disclose internal documents on the client timeline
+    if (user?.role === 'client' && d.visibility !== 'client_shared' && d.visibility !== 'client_visible') return;
+
+    timelineItems.push({
+      id: `synth_doc_${d.id || idx}`,
+      module: 'Documents',
+      icon: '📄',
+      action: 'document_uploaded',
+      title: 'Document Uploaded',
+      description: `Uploaded document "${d.original_name}" under category "${d.category || 'General'}"`,
+      user_name: d.uploader?.full_name || 'System User',
+      created_at: d.created_at ? new Date(d.created_at) : new Date(matter.created_at || new Date()),
+      date: new Date(d.created_at || matter.created_at || new Date()).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
+      time: new Date(d.created_at || matter.created_at || new Date()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      related_matter: matter.title
+    });
+  });
 
   let filtered = [...timelineItems];
   if (moduleFilter && moduleFilter !== 'All') {
     const mf = moduleFilter.toLowerCase();
-    filtered = filtered.filter(item => (item.module || '').toLowerCase().includes(mf));
+    filtered = filtered.filter(item => (item.module || '').toLowerCase().includes(mf) || mf.includes((item.module || '').toLowerCase()));
   }
 
   if (search && search.trim()) {

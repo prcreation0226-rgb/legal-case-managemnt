@@ -198,6 +198,50 @@ const getAdminDashboard = async () => {
     bg: 'bg-slate-100 text-slate-600',
   }));
 
+  // Dynamic Deadline Urgency calculation across matters, calendar events & SOL dates
+  const todayRef = new Date();
+  todayRef.setHours(0, 0, 0, 0);
+  const sevenDaysRef = new Date(todayRef.getTime() + 7 * 86400000);
+  const thirtyDaysRef = new Date(todayRef.getTime() + 30 * 86400000);
+
+  const activeMattersWithDates = await prisma.matter.findMany({
+    where: { status: { in: ['active', 'pending', 'intake'] } },
+    select: { id: true, sol_date: true, next_hearing: true, trial_date: true, initial_filing_date: true }
+  });
+
+  const calEvents = await prisma.calendarEvent.findMany({
+    select: { id: true, event_date: true, type: true }
+  });
+
+  const allDeadlineDates = [];
+  activeMattersWithDates.forEach(m => {
+    if (m.sol_date) allDeadlineDates.push(new Date(m.sol_date));
+    if (m.next_hearing) allDeadlineDates.push(new Date(m.next_hearing));
+    if (m.trial_date) allDeadlineDates.push(new Date(m.trial_date));
+    if (m.initial_filing_date) allDeadlineDates.push(new Date(m.initial_filing_date));
+  });
+
+  calEvents.forEach(e => {
+    if (e.event_date) allDeadlineDates.push(new Date(e.event_date));
+  });
+
+  let overdueThisWeek = 0;
+  let upcoming30Days = 0;
+  let scheduledBeyond30Days = 0;
+
+  allDeadlineDates.forEach(d => {
+    const t = d.getTime();
+    if (t <= sevenDaysRef.getTime()) {
+      overdueThisWeek++;
+    } else if (t > sevenDaysRef.getTime() && t <= thirtyDaysRef.getTime()) {
+      upcoming30Days++;
+    } else {
+      scheduledBeyond30Days++;
+    }
+  });
+
+  const criticalCount = overdueThisWeek + upcoming30Days;
+
   return {
     counts: {
       totalLeads,
@@ -229,6 +273,12 @@ const getAdminDashboard = async () => {
       total: revenueMonthTotal,
       totalFormatted: formatMoney(revenueMonthTotal),
       byPracticeArea: revenueByPracticeArea,
+    },
+    deadlineUrgency: {
+      criticalCount,
+      overdueThisWeek,
+      upcoming30Days,
+      scheduledBeyond30Days,
     },
     recentMatters: recentMatters.map((m) => ({
       id: m.id,

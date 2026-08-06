@@ -1,4 +1,5 @@
 const prisma = require('../../config/db');
+const { formatPSTTime, formatPSTDate } = require('../../utils/dateUtils');
 
 const money = (v) => {
   if (v == null) return 0;
@@ -17,10 +18,10 @@ const relTime = (d) => {
   const now = new Date();
   const diff = now - date;
   if (diff < 86400000 && date.getDate() === now.getDate()) {
-    return `Today, ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+    return `Today, ${formatPSTTime(date, { hour: 'numeric', minute: '2-digit' })}`;
   }
   if (diff < 172800000) return 'Yesterday';
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return formatPSTDate(date);
 };
 
 const getAdminDashboard = async () => {

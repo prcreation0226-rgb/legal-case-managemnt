@@ -1,4 +1,5 @@
 const PDFDocument = require('pdfkit');
+const { formatPSTDate } = require('./dateUtils');
 
 /**
  * Generates a professional, premium PDF report from a report snapshot.
@@ -23,30 +24,14 @@ exports.generateReportPDF = (report, res) => {
 
   // --- Constants & Styling ---
   const primaryColor = '#0B1F3A'; // Deep Navy
-  const accentColor = '#C9A24A';  // Gold
-  const lightGray = '#F8FAFC';
-  const borderGray = '#E2E8F0';
-  const textGray = '#64748B';
+  const accentColor = '#38BDF8';  // Sky Blue
+  const textGray = '#64748B';     // Slate Gray
 
-  // --- Header Section ---
-  doc.rect(0, 0, 612, 120).fill(lightGray);
+  // --- Header ---
+  doc.fillColor(primaryColor).font('Helvetica-Bold').fontSize(22).text('VICTORIA TULSIDAS LAW', 50, 45);
+  doc.fillColor(textGray).font('Helvetica').fontSize(9).text('AUTOMATED ANALYTICS REPORT', 50, 70);
   
-  doc.fillColor(primaryColor)
-     .font('Helvetica-Bold')
-     .fontSize(20)
-     .text('VICTORIA TULSIDAS LAW', 50, 40, { width: 300 });
-  
-  doc.fillColor(accentColor)
-     .font('Helvetica')
-     .fontSize(9)
-     .text('A PROFESSIONAL LEGAL CORPORATION', 50, 65, { characterSpacing: 1.5, width: 300 });
-
-  doc.fillColor(primaryColor)
-     .font('Helvetica-Bold')
-     .fontSize(14)
-     .text('FIRM PERFORMANCE REPORT', 350, 45, { align: 'right', width: 212 });
-
-  doc.moveDown(5);
+  doc.rect(50, 85, 512, 2).fill(primaryColor);
 
   // --- Report Overview Section ---
   const metaY = 140;
@@ -63,11 +48,11 @@ exports.generateReportPDF = (report, res) => {
   
   // Middle Column
   doc.fillColor(textGray).font('Helvetica-Bold').fontSize(8).text('GENERATED ON', 230, infoY);
-  doc.fillColor('#000000').font('Helvetica').fontSize(11).text(new Date(report.created_at).toLocaleDateString(), 230, infoY + 12);
+  doc.fillColor('#000000').font('Helvetica').fontSize(11).text(formatPSTDate(report.created_at), 230, infoY + 12);
   
   // Right Column
   doc.fillColor(textGray).font('Helvetica-Bold').fontSize(8).text('PERIOD COVERED', 410, infoY);
-  doc.fillColor('#000000').font('Helvetica').fontSize(11).text(`${new Date(report.start_date).toLocaleDateString()} - ${new Date(report.end_date).toLocaleDateString()}`, 410, infoY + 12);
+  doc.fillColor('#000000').font('Helvetica').fontSize(11).text(`${formatPSTDate(report.start_date)} - ${formatPSTDate(report.end_date)}`, 410, infoY + 12);
 
   doc.moveDown(4);
 

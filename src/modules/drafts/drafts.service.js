@@ -3,6 +3,7 @@ const PDFDocument = require('pdfkit');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
+const { formatPSTDate, formatPSTTime } = require('../../utils/dateUtils');
 const getAll = async (query, user) => {
   const { matter_id, status, page = 1, limit = 10 } = query;
   const take = parseInt(limit);
@@ -209,11 +210,7 @@ const resolveTemplateVariables = (content, draft, matter, company) => {
     [primaryClient?.city, primaryClient?.state, primaryClient?.postal_code].filter(Boolean).join(', ')
   ].filter(Boolean).join('\n') || '';
 
-  const todayDate = new Date().toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
-  });
+  const todayDate = formatPSTDate(new Date(), { month: 'long', day: 'numeric', year: 'numeric' });
 
   const firmName = company.company_name || '';
   const firmAddress = company.address || '';
@@ -233,11 +230,11 @@ const resolveTemplateVariables = (content, draft, matter, company) => {
   const caseNumber = matter?.case_number || matter?.matter_number || '';
   const judge = matter?.judge_name || '';
   const department = matter?.court_room || '';
-  const hearingDate = matter?.next_hearing ? new Date(matter.next_hearing).toLocaleDateString('en-US') : '';
-  const hearingTime = matter?.next_hearing ? new Date(matter.next_hearing).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
-  const complaintFiled = matter?.initial_filing_date ? new Date(matter.initial_filing_date).toLocaleDateString('en-US') : '';
-  const trialDate = matter?.trial_date ? new Date(matter.trial_date).toLocaleDateString('en-US') : '';
-  const trialTime = matter?.trial_date ? new Date(matter.trial_date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
+  const hearingDate = matter?.next_hearing ? formatPSTDate(matter.next_hearing) : '';
+  const hearingTime = matter?.next_hearing ? formatPSTTime(matter.next_hearing) : '';
+  const complaintFiled = matter?.initial_filing_date ? formatPSTDate(matter.initial_filing_date) : '';
+  const trialDate = matter?.trial_date ? formatPSTDate(matter.trial_date) : '';
+  const trialTime = matter?.trial_date ? formatPSTTime(matter.trial_date) : '';
 
   const variables = {
     'FirmName': firmName,
@@ -354,11 +351,11 @@ const generatePdf = (draftId, user) => {
       const caseNumber = matter?.case_number || matter?.matter_number || '';
       const judge = matter?.judge_name || '';
       const department = matter?.court_room || '';
-      const hearingDate = matter?.next_hearing ? new Date(matter.next_hearing).toLocaleDateString('en-US') : '';
-      const hearingTime = matter?.next_hearing ? new Date(matter.next_hearing).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
-      const complaintFiled = matter?.initial_filing_date ? new Date(matter.initial_filing_date).toLocaleDateString('en-US') : '';
-      const trialDate = matter?.trial_date ? new Date(matter.trial_date).toLocaleDateString('en-US') : '';
-      const trialTime = matter?.trial_date ? new Date(matter.trial_date).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
+      const hearingDate = matter?.next_hearing ? formatPSTDate(matter.next_hearing) : '';
+      const hearingTime = matter?.next_hearing ? formatPSTTime(matter.next_hearing) : '';
+      const complaintFiled = matter?.initial_filing_date ? formatPSTDate(matter.initial_filing_date) : '';
+      const trialDate = matter?.trial_date ? formatPSTDate(matter.trial_date) : '';
+      const trialTime = matter?.trial_date ? formatPSTTime(matter.trial_date) : '';
       
       const variables = {
         FirmName: firmName,

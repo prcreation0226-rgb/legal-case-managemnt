@@ -1,4 +1,5 @@
 const prisma = require('../../config/db');
+const { formatPSTDate } = require('../../utils/dateUtils');
 
 const formatUSPhone = (value) => {
   if (!value) return '';
@@ -176,7 +177,7 @@ const cloneToMatter = async (templateId, matterId, user, extraData = {}) => {
     content = content.replace(/{{vehicle\.make_model}}/g, firstVehicle.make ? `${firstVehicle.year || ''} ${firstVehicle.make} ${firstVehicle.model}` : 'Vehicle');
     content = content.replace(/{{vehicle\.vin}}/g, firstVehicle.vin || 'VIN-PENDING');
     content = content.replace(/{{vehicle\.license_plate}}/g, firstVehicle.license_plate || 'PLATE-PENDING');
-    content = content.replace(/{{incident\.date}}/g, matter.date_of_loss ? new Date(matter.date_of_loss).toLocaleDateString() : 'Date of Loss');
+    content = content.replace(/{{incident\.date}}/g, matter.date_of_loss ? formatPSTDate(matter.date_of_loss) : 'Date of Loss');
 
     // Matter Info Tags
     content = content.replace(/{{matter\.no}}/g, matter.matter_number || '');
@@ -184,8 +185,8 @@ const cloneToMatter = async (templateId, matterId, user, extraData = {}) => {
     content = content.replace(/{{case_number}}/g, matter.matter_number || '');
     content = content.replace(/{{matter_title}}/g, matter.title || '');
     content = content.replace(/{{lawyer_name}}/g, matter.assigned_lawyer?.full_name || '');
-    content = content.replace(/{{date}}/g, new Date().toLocaleDateString());
-    content = content.replace(/{{current_date}}/g, new Date().toLocaleDateString());
+    content = content.replace(/{{date}}/g, formatPSTDate(new Date()));
+    content = content.replace(/{{current_date}}/g, formatPSTDate(new Date()));
 
     const company = await tx.companyProfile.findFirst() || {};
     content = content.replace(/{{firm_name}}/g, company.company_name || '');

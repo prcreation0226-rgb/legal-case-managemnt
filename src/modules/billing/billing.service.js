@@ -1,6 +1,7 @@
 const prisma = require('../../config/db');
 const PDFDocument = require('pdfkit');
 const settingsService = require('../settings/settings.service');
+const { formatPSTDate } = require('../../utils/dateUtils');
 
 /** 
  * Build a professional PDF using pdfkit.
@@ -125,8 +126,8 @@ async function buildInvoicePdfBuffer(invoice) {
       };
 
       drawMetaRow('Invoice #:', invoice.invoice_number, metaY + 15);
-      drawMetaRow('Date Issued:', new Date(invoice.issued_at || invoice.created_at).toLocaleDateString(), metaY + 30);
-      drawMetaRow('Due Date:', invoice.due_date ? new Date(invoice.due_date).toLocaleDateString() : 'Upon Receipt', metaY + 45);
+      drawMetaRow('Date Issued:', formatPSTDate(invoice.issued_at || invoice.created_at), metaY + 30);
+      drawMetaRow('Due Date:', invoice.due_date ? formatPSTDate(invoice.due_date) : 'Upon Receipt', metaY + 45);
       drawMetaRow('Billing Attorney:', invoice.created_by?.full_name || 'Firm Administrator', metaY + 60);
       drawMetaRow('Status:', invoice.status.toUpperCase(), metaY + 75, invoice.status === 'paid' ? '#10B981' : '#F59E0B');
 

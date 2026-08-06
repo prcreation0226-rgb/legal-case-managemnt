@@ -1,6 +1,7 @@
 const prisma = require('../../config/db');
 const billingService = require('../billing/billing.service');
 const { findDuplicateContact } = require('../contacts/contacts.service');
+const { formatPSTDate, formatPSTTime } = require('../../utils/dateUtils');
 
 const canAccessMatter = (matter, user) => {
   if (!matter || !user) return false;
@@ -1927,8 +1928,8 @@ async function getMatterTimeline(id, query = {}, user) {
       user_name: act.actor?.full_name || 'System User',
       actor_id: act.actor_user_id,
       created_at: act.created_at,
-      date: new Date(act.created_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
-      time: new Date(act.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      date: formatPSTDate(act.created_at),
+      time: formatPSTTime(act.created_at),
       related_matter: matter.title || `Matter #${id}`,
       related_party: parsedData.related_party || null
     });
@@ -1945,8 +1946,8 @@ async function getMatterTimeline(id, query = {}, user) {
     description: `Matter "${matter.title || 'Legal Case'}" was created and logged into case management system.`,
     user_name: matter.assigned_lawyer?.full_name || 'Primary Counsel',
     created_at: matter.created_at || new Date(),
-    date: new Date(matter.created_at || new Date()).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
-    time: new Date(matter.created_at || new Date()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+    date: formatPSTDate(matter.created_at || new Date()),
+    time: formatPSTTime(matter.created_at || new Date()),
     related_matter: matter.title || `Matter #${id}`
   });
 
@@ -1974,8 +1975,8 @@ async function getMatterTimeline(id, query = {}, user) {
         description: `${role} "${p.full_name || p.company_name || 'Party'}" recorded in matter file.`,
         user_name: 'Case Manager',
         created_at: p.created_at ? new Date(p.created_at) : new Date(matter.created_at || new Date()),
-        date: new Date(p.created_at || matter.created_at || new Date()).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
-        time: new Date(p.created_at || matter.created_at || new Date()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+        date: formatPSTDate(p.created_at || matter.created_at || new Date()),
+        time: formatPSTTime(p.created_at || matter.created_at || new Date()),
         related_matter: matter.title,
         related_party: p.full_name || p.company_name
       });
@@ -1993,8 +1994,8 @@ async function getMatterTimeline(id, query = {}, user) {
       description: `Recorded vehicle: ${v.year || ''} ${v.make || ''} ${v.model || ''} (VIN: ${v.vin || 'N/A'})`,
       user_name: 'Case Manager',
       created_at: v.created_at ? new Date(v.created_at) : new Date(matter.created_at || new Date()),
-      date: new Date(v.created_at || matter.created_at || new Date()).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
-      time: new Date(v.created_at || matter.created_at || new Date()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      date: formatPSTDate(v.created_at || matter.created_at || new Date()),
+      time: formatPSTTime(v.created_at || matter.created_at || new Date()),
       related_matter: matter.title
     });
   });
@@ -2013,8 +2014,8 @@ async function getMatterTimeline(id, query = {}, user) {
       description: `Uploaded document "${d.original_name}" under category "${d.category || 'General'}"`,
       user_name: d.uploader?.full_name || 'System User',
       created_at: d.created_at ? new Date(d.created_at) : new Date(matter.created_at || new Date()),
-      date: new Date(d.created_at || matter.created_at || new Date()).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
-      time: new Date(d.created_at || matter.created_at || new Date()).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+      date: formatPSTDate(d.created_at || matter.created_at || new Date()),
+      time: formatPSTTime(d.created_at || matter.created_at || new Date()),
       related_matter: matter.title
     });
   });
@@ -2090,8 +2091,8 @@ async function addMatterTimelineEvent(id, payload, user) {
     description: payload.description || '',
     user_name: activity.actor?.full_name || user?.full_name || 'System User',
     created_at: activity.created_at,
-    date: new Date(activity.created_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
-    time: new Date(activity.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+    date: formatPSTDate(activity.created_at),
+    time: formatPSTTime(activity.created_at),
     related_matter: matter.title,
     related_party: payload.related_party || null
   };
@@ -2140,8 +2141,8 @@ async function updateMatterTimelineEvent(id, eventId, payload, user) {
     description: descObj.description || '',
     user_name: updated.actor?.full_name || 'System User',
     created_at: updated.created_at,
-    date: new Date(updated.created_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
-    time: new Date(updated.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+    date: formatPSTDate(updated.created_at),
+    time: formatPSTTime(updated.created_at),
     related_party: descObj.related_party || null
   };
 }

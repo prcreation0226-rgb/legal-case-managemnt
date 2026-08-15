@@ -7,38 +7,37 @@ cron.schedule('0 * * * *', async () => {
   try {
     const now = new Date();
     
-    // Check Reminders (reminder_date <= now) and not reminder_sent and not completed
-    const pendingReminders = await prisma.task.findMany({
-      where: {
-        reminder_date: { lte: now },
-        reminder_sent: false,
-        status: { not: 'completed' },
-      },
-      include: {
-        assigned_user: { select: { id: true, full_name: true } },
-        created_by: { select: { id: true, full_name: true } },
-      }
-    });
+    // Check Reminders (due_date minus reminder_minutes_before <= now) and not reminder_sent and not completed
+    const pendingReminders = await prisma.$queryRawUnsafe(`
+      SELECT * FROM matter_tasks 
+      WHERE status NOT IN ('Completed', 'Cancelled')
+        AND reminder_sent = 0 
+        AND due_date IS NOT NULL
+        AND DATE_SUB(due_date, INTERVAL reminder_minutes_before MINUTE) <= NOW()
+    `);
 
-    for (const task of pendingReminders) {
-      if (task.assigned_user_id) {
-        await prisma.notification.create({
-          data: {
-            user_id: task.assigned_user_id,
-            title: `Reminder: ${task.title}`,
-            message: `Task reminder for: ${task.title}`,
-            type: 'task_reminder',
-            reference_id: task.id,
-            reference_type: 'task'
-          }
-        });
+    if (Array.isArray(pendingReminders)) {
+      for (const task of pendingReminders) {
+        if (task.assigned_user_id) {
+          await prisma.notification.create({
+            data: {
+              user_id: task.assigned_user_id,
+              title: `Reminder: ${task.title}`,
+              message: `Task reminder for: ${task.title}`,
+              type: 'task_reminder',
+              reference_id: task.id,
+              reference_type: 'task'
+            }
+          });
+        }
+        
+        // Update as sent
+        await prisma.$executeRawUnsafe(`
+          UPDATE matter_tasks 
+          SET reminder_sent = 1 
+          WHERE id = ${task.id}
+        `);
       }
-      
-      // Update as sent
-      await prisma.task.update({
-        where: { id: task.id },
-        data: { reminder_sent: true }
-      });
     }
 
     // Determine boundaries for "due today" and "overdue"
